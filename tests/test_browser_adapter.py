@@ -40,6 +40,10 @@ class _FakeLocator:
         self.on_fill = on_fill
         self.filled = None
         self.clicked = False
+        self.attributes = {}
+
+    async def get_attribute(self, name):
+        return self.attributes.get(name)
 
     async def count(self):
         return self._count
@@ -68,6 +72,12 @@ class _FakeLocator:
 class _FakePage:
     def __init__(self, composer: _FakeLocator, sender: _FakeLocator):
         self.composer, self.sender = composer, sender
+        self.composer.attributes = {"contenteditable": "true"}
+        self.sender.attributes = {
+            "data-test": "refinement-prompt-submit-button",
+            "aria-label": "Send",
+            "type": "submit",
+        }
 
     def locator(self, selector):
         return {"[data-test=composer]": self.composer,
@@ -184,6 +194,27 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 page, "OK", "[data-test=composer]", "[data-test=send]"
             )
         self.assertFalse(sender.clicked)
+
+    async def test_click_requires_real_brain_send_semantics(self):
+        composer, sender = _FakeLocator(), _FakeLocator()
+        page = _FakePage(composer, sender)
+        sender.attributes["aria-label"] = "Attach context and files"
+        with self.assertRaisesRegex(BrowserAdapterError, "verified Brain Send"):
+            await _send_via_ui(
+                page, "ping", "[data-test=composer]", "[data-test=send]"
+            )
+        self.assertFalse(sender.clicked)
+
+    async def test_editor_must_be_contenteditable(self):
+        composer, sender = _FakeLocator(), _FakeLocator()
+        page = _FakePage(composer, sender)
+        composer.attributes["contenteditable"] = "false"
+        with self.assertRaisesRegex(BrowserAdapterError, "not the expected editable"):
+            await _send_via_ui(
+                page, "ping", "[data-test=composer]", "[data-test=send]"
+            )
+        self.assertFalse(sender.clicked)
+        self.assertIsNone(composer.filled)
 
     async def test_missing_or_blank_prompt_refuses_send(self):
         sender = _FakeLocator()
