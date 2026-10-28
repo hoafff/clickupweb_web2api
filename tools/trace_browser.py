@@ -207,6 +207,9 @@ class NetworkObserver:
     async def _capture_response(self, request: Request) -> None:
         if self.content_sink is None:
             return
+        phase = self._request_phases.get(id(request), "unmarked")
+        if phase == "unmarked":
+            return
         try:
             response = await request.response()
             if response is None:
@@ -237,7 +240,7 @@ class NetworkObserver:
             return
 
     def _schedule_response_capture(self, request: Request) -> None:
-        if self.content_sink is None:
+        if self.content_sink is None or self._request_phases.get(id(request), "unmarked") == "unmarked":
             return
         task = asyncio.create_task(self._capture_response(request))
         self._pending.add(task)
@@ -265,7 +268,7 @@ class NetworkObserver:
             return
         self._request_starts[id(request)] = time.monotonic()
         self._request_phases[id(request)] = self.current_phase
-        if self.content_sink is not None:
+        if self.content_sink is not None and self.current_phase != "unmarked":
             try:
                 raw = request.post_data_buffer
                 if raw:
@@ -340,7 +343,11 @@ class NetworkObserver:
         self.sink.write("ws_open", websocket_id=ws_id, url=path)
 
         def frame(direction: str, data: str | bytes) -> None:
-            if self.content_sink is not None and isinstance(data, str):
+            if (
+                self.content_sink is not None
+                and self.current_phase != "unmarked"
+                and isinstance(data, str)
+            ):
                 payload = parse_content(data, max_bytes=self.max_content_bytes)
                 if payload.get("format") == "json":
                     self.content_sink.write(
@@ -435,6 +442,7 @@ async def main() -> int:
     print(f"Allowed hosts: {', '.join(hosts)}")
     if args.capture_content:
         print(f"PRIVATE JSON content file: {content_output}")
+        print("Content capture starts ONLY after the first 'mark NAME' command.")
         print("Sensitive contents may remain even after best-effort redaction.")
         print("Never publish this file or raw browser profile without manual review.")
     else:
