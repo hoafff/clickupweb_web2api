@@ -257,7 +257,7 @@ def create_app(
             try:
                 raw = await asyncio.wait_for(snapshot_fn(), timeout=3.0)
                 return sanitize_ui_snapshot(raw)
-            except (asyncio.TimeoutError, Exception) as exc:
+            except Exception as exc:
                 raise HTTPException(
                     status_code=503,
                     detail="UI metadata probe unavailable; inspect the browser.",
