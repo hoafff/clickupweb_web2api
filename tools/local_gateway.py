@@ -382,7 +382,9 @@ class LiveBrowserEngine:
                     await page.locator(COMPOSER_CSS).wait_for(
                         state="visible", timeout=20_000
                     )
-                    self._last_conversation_id = None
+                    # Keep previous reply ID only for diagnostic equality.
+                    # Router mode never uses strict_conversation; UI isolation
+                    # is enforced by fresh landing navigation, not ID reset.
 
                 # The current UI model/effort is selected manually before serving.
                 # In legacy mode the browser retains chat context.
