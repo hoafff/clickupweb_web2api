@@ -235,17 +235,34 @@ async def _send_via_ui(
         raise BrowserAdapterError("Both composer and send CSS selectors are required.")
     try:
         composer = page.locator(composer_css)
-        sender = page.locator(send_css)
-        if await composer.count() != 1 or await sender.count() != 1:
+        if await composer.count() != 1:
             raise BrowserAdapterError(
-                "Composer/send selector did not match exactly one element each; "
-                "no message was sent."
+                "Composer selector must match exactly one element; no message was sent."
             )
-        if not await composer.is_visible() or not await sender.is_visible():
+        if not await composer.is_visible():
             raise BrowserAdapterError(
-                "Composer or send button is not visible; no message was sent."
+                "Composer is not visible; no message was sent."
             )
+        # ClickUp may render/enable the Send button only AFTER a draft exists.
+        # Do not require the Send control to exist before filling the editor.
         await composer.fill(prompt, timeout=5_000)
+        sender = page.locator(send_css)
+        try:
+            await sender.wait_for(state="visible", timeout=5_000)
+        except PlaywrightError as exc:
+            raise BrowserAdapterError(
+                "Send control did not become visible after typing; "
+                "draft may remain UNSENT in the editor."
+            ) from exc
+        if await sender.count() != 1 or not await sender.is_visible():
+            raise BrowserAdapterError(
+                "Send selector must match exactly one visible control; "
+                "draft may remain UNSENT."
+            )
+        if not await sender.is_enabled():
+            raise BrowserAdapterError(
+                "Send control is disabled; draft may remain UNSENT."
+            )
         await sender.click(timeout=5_000)
     except PlaywrightError as exc:
         raise BrowserAdapterError(
