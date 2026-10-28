@@ -152,7 +152,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
 
         composer._count = 1
         sender._visible = False
-        with self.assertRaisesRegex(BrowserAdapterError, "not visible"):
+        with self.assertRaisesRegex(BrowserAdapterError, "did not become visible"):
             await _send_via_ui(page, "ping", "[data-test=composer]", "[data-test=send]")
         self.assertEqual(composer.filled, "ping")
         self.assertFalse(sender.clicked)
