@@ -90,3 +90,29 @@ Nếu xuất hiện một candidate Send button, **phải đối chiếu với i
 ### Cập nhật auto-send để hỗ trợ nút chỉ hiện sau khi gõ
 
 `_send_via_ui()` trong `tools/browser_adapter.py` giờ kiểm tra **composer duy nhất và visible**, sau đó mới `fill(prompt)`, **chờ Send selector xuất hiện**, yêu cầu đúng 1 nút visible+enabled rồi mới `click()`. Nếu Send không xuất hiện thì **không click**, nhưng bản nháp có thể vẫn còn trong ô nhập. Chỉ sử dụng với selector **đã xác minh bằng DOM** và cờ `--confirm-send`.
+
+## 28/10/2026 — Second-pass DOM đã xác minh nút Send
+
+**Bằng chứng trực tiếp** người nghiên cứu cung cấp bằng `inspect_brain_ui.py --after-draft` cùng ảnh giao diện. Không lưu ảnh, tin nhắn nháp hoặc Workspace ID vào repo.
+
+| Element | CSS selector | Trạng thái |
+|---|---|---|
+| Brain composer | `div[contenteditable="true"]` | Unique ở thời điểm inspect, `stable=false` |
+| Nút Send | `button[data-test="refinement-prompt-submit-button"]` | **Newly visible** sau khi nhập nháp, `aria-label=Send`, `type=submit`, `disabled=false`, `stable=true` |
+| Chọn model | `button[data-test="content-assistant-model-selector-dropdown__trigger"]` | Present, stable |
+
+Số nút gần composer tăng **11 → 12**; `difference.newly_visible_buttons` chỉ có đúng nút Submit, `newly_enabled_buttons=[]`. Vị trí đo: ô editor `x=364,y=273,w=600,h=72`; Send `x=936,y=353,w=28,h=28`. Tọa độ chỉ phục vụ đối chiếu, **không** click theo tọa độ cố định.
+
+### First live auto-send acceptance test
+
+Đóng browser của inspector, mở **một** phiên Brain Ask, để ô nhập trống rồi:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\browser_adapter.py --mode auto --confirm-send --composer-selector 'div[contenteditable="true"]' --send-selector 'button[data-test="refinement-prompt-submit-button"]' --timeout 120 --show-reply
+```
+
+Trong Chromium, chọn model/effort mong muốn. PowerShell hỏi Enter để arm, **sau đó hỏi prompt**: nhập `Trả lời đúng một từ: OK` và Enter. Tool fill editor trước, đợi Send xuất hiện, bắt buộc `data-test=refinement-prompt-submit-button`, `aria-label=Send`, `type=submit` và enabled, rồi mới click. Quan sát `aiConversationStarted` + `chatCommentCreated`; kỳ vọng `SUCCESS` và reply `OK` nhưng **chưa khẳng định PASS live trước khi chạy thực tế**.
+
+**Lưu ý:** Không bấm Send bằng tay trong khi chạy auto. Nếu báo lỗi selector/button thì tool không click, nhưng nháp có thể còn trong ô nhập. Gửi log đã loại bỏ nội dung riêng tư; tuyệt đối không gửi browser profile, cookie, access token hoặc HAR.
