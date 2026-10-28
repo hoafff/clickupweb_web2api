@@ -40,6 +40,10 @@ from tools.browser_adapter import (
     _send_via_ui,
 )
 from tools.inspect_brain_ui import select_brain_page
+from tools.session_lease import (
+    ExclusiveSessionLease, SessionAlreadyClaimedError,
+    SessionNotClaimedError, SessionAccessDeniedError,
+)
 
 MODEL_ID = "clickup-ui-current"
 COMPOSER_CSS = 'div[contenteditable="true"]'
@@ -79,7 +83,9 @@ class ChatRequest(BaseModel):
     n: Literal[1] = 1
 
 
-def create_app(engine: PromptEngine, *, api_key: str) -> FastAPI:
+def create_app(
+    engine: PromptEngine, *, api_key: str, require_session: bool = False
+) -> FastAPI:
     """Build an app with an injectable engine for fully offline tests."""
     if len(api_key) < 24:
         raise ValueError("CLICKUP_GATEWAY_API_KEY must be at least 24 characters")
@@ -90,6 +96,7 @@ def create_app(engine: PromptEngine, *, api_key: str) -> FastAPI:
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"]
     )
+    lease = ExclusiveSessionLease() if require_session else None
 
     def require_api_key(authorization: str | None = Header(default=None)) -> None:
         prefix = "Bearer "
@@ -103,6 +110,24 @@ def create_app(engine: PromptEngine, *, api_key: str) -> FastAPI:
                 detail="Unauthorized",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+    def require_owner(
+        x_clickup_session: str | None = Header(default=None, alias="X-ClickUp-Session"),
+    ) -> None:
+        if lease is None:
+            return
+        try:
+            lease.check(x_clickup_session)
+        except SessionNotClaimedError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="Browser session has no owner; claim it first.",
+            ) from exc
+        except SessionAccessDeniedError as exc:
+            raise HTTPException(
+                status_code=403,
+                detail="Incorrect or missing browser session capability.",
+            ) from exc
 
     @app.get("/healthz")
     def healthz() -> dict:
@@ -118,12 +143,38 @@ def create_app(engine: PromptEngine, *, api_key: str) -> FastAPI:
             }],
         }
 
-    @app.get("/v1/session/diagnostics", dependencies=[Depends(require_api_key)])
+    @app.post("/v1/session/claim", dependencies=[Depends(require_api_key)])
+    def claim_session() -> dict:
+        if lease is None:
+            raise HTTPException(
+                status_code=409, detail="Session leasing is disabled in legacy mode.",
+            )
+        if not engine.is_ready():
+            raise HTTPException(status_code=503, detail="Browser is not ready.")
+        try:
+            secret = lease.claim()
+        except SessionAlreadyClaimedError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="Browser context already claimed; restart worker after inspection.",
+            ) from exc
+        return {
+            "object": "browser.session",
+            "session_token": secret,
+            "policy": "single-owner-sticky-context",
+            "note": "This is an API lease, not a new ClickUp conversation.",
+        }
+
+    @app.get("/v1/session/diagnostics", dependencies=[
+        Depends(require_api_key), Depends(require_owner),
+    ])
     def session_diagnostics() -> dict:
         # No workspace/conversation/AI result identifiers leave the process.
         return engine.session_diagnostics()
 
-    @app.post("/v1/chat/completions", dependencies=[Depends(require_api_key)])
+    @app.post("/v1/chat/completions", dependencies=[
+        Depends(require_api_key), Depends(require_owner),
+    ])
     async def chat(request: ChatRequest) -> dict:
         # Explicitly do not claim support for system prompts, prior messages,
         # model switching, tools, images, token streaming or token usage.
@@ -171,7 +222,10 @@ def create_app(engine: PromptEngine, *, api_key: str) -> FastAPI:
 class LiveBrowserEngine:
     """One visible Chromium session. Requires manual login/readiness step."""
 
-    def __init__(self, *, profile: Path, url: str, timeout: float = 120) -> None:
+    def __init__(
+        self, *, profile: Path, url: str, timeout: float = 120,
+        strict_conversation: bool = False,
+    ) -> None:
         self.profile = profile
         self.url = url
         self.timeout = timeout
@@ -186,6 +240,7 @@ class LiveBrowserEngine:
         self._same_conversation = 0
         self._different_conversation = 0
         self._last_relation: str = "unobserved"
+        self.strict_conversation = strict_conversation
 
     def is_ready(self) -> bool:
         return self._ready and not self._degraded and self._context is not None
@@ -269,6 +324,17 @@ class LiveBrowserEngine:
                 self.bridge.arm()
                 await _send_via_ui(page, prompt, COMPOSER_CSS, SEND_CSS)
                 reply = await self.bridge.await_reply_created(timeout=self.timeout)
+                if self.strict_conversation:
+                    # In single-owner mode an unexpected switch to a new ClickUp
+                    # conversation must not return as the same logical context.
+                    # The UI send has already occurred: mark degraded, never retry.
+                    if not reply.conversation_id:
+                        raise GatewaySendError("WS reply lacks conversation ID.")
+                    if (
+                        self._last_conversation_id is not None
+                        and reply.conversation_id != self._last_conversation_id
+                    ):
+                        raise GatewaySendError("UI conversation unexpectedly changed.")
                 self._observe_reply_conversation(reply.conversation_id)
                 return reply.text
             except asyncio.CancelledError:
@@ -314,7 +380,8 @@ async def serve(args: argparse.Namespace, api_key: str) -> None:
 
     profile = args.profile_dir.expanduser().resolve()
     async with LiveBrowserEngine(
-        profile=profile, url=args.url, timeout=args.timeout
+        profile=profile, url=args.url, timeout=args.timeout,
+        strict_conversation=args.require_session,
     ) as engine:
         print("Visible Chromium launched. Log in to your authorized Workspace.")
         print("Open ClickUp Brain Ask; select model and effort in the browser.")
@@ -327,13 +394,23 @@ async def serve(args: argparse.Namespace, api_key: str) -> None:
         if "/ai/brain" not in urlsplit(page.url).path:
             raise GatewayUnavailableError("Navigate to Brain Ask first.")
         engine.mark_ready()
-        app = create_app(engine, api_key=api_key)
+        app = create_app(
+            engine, api_key=api_key, require_session=args.require_session
+        )
         config = uvicorn.Config(
             app, host="127.0.0.1", port=args.port,
             access_log=False, log_level="warning",
         )
         print(f"LOCAL API ready at http://127.0.0.1:{args.port}")
         print("Only model=clickup-ui-current and one user message are supported.")
+        if args.require_session:
+            print("EXCLUSIVE MODE: POST /v1/session/claim first; "
+                  "send X-ClickUp-Session on chat/diagnostics.")
+            print("No session release: close and inspect/restart the browser "
+                  "before assigning it to another owner.")
+        else:
+            print("LEGACY MODE: all authorized HTTP calls share browser history. "
+                  "Do not expose this to other users.")
         print("No streaming, no token usage accounting; Ctrl+C to close.")
         server = uvicorn.Server(config)
         await server.serve()
@@ -345,6 +422,10 @@ def main() -> int:
     parser.add_argument("--profile-dir", type=Path, default=DEFAULT_PROFILE)
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument(
+        "--require-session", action="store_true",
+        help="Require a one-time API lease for the sticky browser conversation",
+    )
     args = parser.parse_args()
     api_key = os.environ.get("CLICKUP_GATEWAY_API_KEY", "")
     if len(api_key) < 24:
