@@ -20,8 +20,9 @@ from tools.brain_ui_state_probe import (
     BOOLEAN_FIELDS, COUNT_FIELDS, BRAIN_UI_STATE_JS, sanitize_ui_snapshot,
 )
 from tools.check_brain_ui_state import (
-    ResearchProbeError, classify_router_failure, collect, get_snapshot, main,
-    observe_transitions, summarise,
+    ResearchProbeError, classify_router_failure, classify_stop_timing,
+    collect, get_snapshot, main, observe_transitions,
+    safe_research_reply_metrics, summarise,
 )
 from tools.local_gateway import create_app
 
@@ -125,6 +126,42 @@ class UIStateUnitTests(unittest.TestCase):
                 "stop_ever_visible": True,
             },
         )
+
+    def test_stop_exit_order_is_relative_to_router_client_return_only(self):
+        before = classify_stop_timing(
+            [(1.0, False), (2.0, True), (3.0, False), (5.0, False)],
+            4.0,
+        )
+        self.assertEqual(before["ui_samples_before_router_return"], 3)
+        self.assertEqual(before["ui_samples_after_router_return"], 1)
+        self.assertTrue(before["stop_disappearance_before_router_return"])
+        self.assertFalse(before["stop_visible_last_sample_before_router_return"])
+        self.assertFalse(before["stop_seen_after_router_return"])
+
+        later = classify_stop_timing(
+            [(1.0, False), (2.0, True), (3.0, True), (4.0, False)],
+            3.5,
+        )
+        self.assertFalse(later["stop_disappearance_before_router_return"])
+        self.assertTrue(later["stop_visible_last_sample_before_router_return"])
+        self.assertFalse(later["stop_seen_after_router_return"])
+
+        empty = classify_stop_timing([], 5.0)
+        self.assertEqual(empty["ui_samples_before_router_return"], 0)
+        self.assertIsNone(empty["stop_visible_last_sample_before_router_return"])
+
+    def test_public_reply_suffix_only_never_prints_private_content(self):
+        good = safe_research_reply_metrics(
+            "PRIVATE_SYNTHETIC_BODY " + "UI_RESEARCH_END" + "\n"
+        )
+        self.assertTrue(good["router_reply_has_expected_suffix"])
+        self.assertEqual(
+            good["router_reply_characters"],
+            len("PRIVATE_SYNTHETIC_BODY UI_RESEARCH_END\n"),
+        )
+        self.assertNotIn("PRIVATE_SYNTHETIC_BODY", json.dumps(good))
+        bad = safe_research_reply_metrics("text without marker")
+        self.assertFalse(bad["router_reply_has_expected_suffix"])
 
     def test_summary_restricts_output_to_fixed_keys_and_counts(self):
         changed = {**SAMPLE, "stop_candidate_count": 0,
@@ -285,6 +322,34 @@ class UIResearchClientLoopbackTests(unittest.TestCase):
             self.assertNotIn("PRIVATE_SERVER_BODY", output + stderr.getvalue())
             self.assertNotIn("fixture-only-separate-client-key", output + stderr.getvalue())
             self.assertIn("Do NOT retry blindly", stderr.getvalue())
+
+    def test_drive_router_success_has_end_marker_and_no_raw_reply(self):
+        with tempfile.TemporaryDirectory(prefix="safe-ui-success-") as folder:
+            key = Path(folder) / "gateway.key"
+            key.write_text(KEY + "\n", encoding="ascii")
+            private_reply = "PRIVATE_TEST_CONTENT " + "UI_RESEARCH_END"
+            with patch("tools.check_brain_ui_state.get_snapshot",
+                       return_value=SAMPLE), \
+                 patch("tools.check_brain_ui_state.read_key",
+                       return_value="fixture-only-9router-key"), \
+                 patch("tools.check_brain_ui_state.reject_reused_upstream_key"), \
+                 patch("tools.check_brain_ui_state.chat_once",
+                       return_value=(private_reply, "application/json")), \
+                 patch("tools.check_brain_ui_state.time.sleep"):
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    code = main([
+                        "--drive-router", "--samples", "4", "--interval", "0.2",
+                        "--key-file", str(key),
+                    ])
+            self.assertEqual(code, 0)
+            report = stdout.getvalue()
+            self.assertIn('"router_request_outcome": "success"', report)
+            self.assertIn('"router_reply_has_expected_suffix": true', report)
+            self.assertIn('"ui_samples_before_router_return"', report)
+            self.assertIn('"stop_disappearance_before_router_return"', report)
+            self.assertNotIn("PRIVATE_TEST_CONTENT", report)
+            self.assertNotIn("fixture-only-9router-key", report)
 
     def test_cli_snapshot_and_watch_no_prompt(self):
         import contextlib
