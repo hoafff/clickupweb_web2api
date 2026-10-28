@@ -84,6 +84,40 @@ class TraceAnalyzerTests(unittest.TestCase):
         self.assertEqual(phase["chat_commands"][1]["http_status"], 201)
         self.assertEqual(phase["ws_events"]["aiConversationStarted"], 1)
 
+    def test_ai_result_event_crosses_marker_boundary_without_leaking_id(self):
+        meta = [
+            event("manual_marker", 1, label="opus_low"),
+            event("manual_marker", 10, label="opus_low"),
+        ]
+        content = [
+            event(
+                "ws_frame_content", 5,
+                payload={"data": {
+                    "event": {"name": "aiConversationStarted",
+                              "payload": {"ai_result_id": "secret-result-123"}}
+                }},
+            ),
+            event(
+                "ws_frame_content", 12,
+                payload={"data": {
+                    "event": {"name": "chatCommentCreated",
+                              "version_event_data": {
+                                  "changes": [
+                                      {"field": "ai_result_id",
+                                       "after": "secret-result-123"}
+                                  ]
+                              }}
+                }},
+            ),
+        ]
+        report = summarize(meta, content)
+        self.assertEqual(report["matched_ai_start_to_comment_created"], 1)
+        self.assertEqual(
+            report["cross_marker_correlations"],
+            [{"started_phase": 1, "event_phase": 2, "event": "chatCommentCreated"}],
+        )
+        self.assertNotIn("secret-result-123", str(report))
+
     def test_telemetry_output_whitelists_known_values(self):
         meta = [event("manual_marker", 1, label="max_first")]
         content = [telemetry(2, "private-secret-identifier", "private-secret-identifier")]
