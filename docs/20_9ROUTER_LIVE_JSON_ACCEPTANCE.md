@@ -140,3 +140,20 @@ This performs **one more real request**, may consume ClickUp allowance, and does
 2. Test controlled restart, browser/profile recovery and session expiry. This is required for unattended operation on a Windows service or Linux browser worker; **not yet verified**.
 3. Evaluate actual coding-agent request shapes, especially `tools/tool_choice`, as supported inputs only after native tool results can be represented faithfully. Current `422` reject behavior remains correct.
 4. Remain local-only for now; do not expose `127.0.0.1:8787` publicly or copy the authenticated Chromium profile to GitHub/CI.
+
+
+### Read-only offline completion-signal metadata audit
+
+Added `tools/audit_brain_completion_metadata.py` as a safe first research step. The script reads a **private local authorized WS JSONL capture**, does **not** send any requests, and outputs **only hardcoded aggregate counters**. It never prints raw event names outside a fixed whitelist, prompts, response text, opaque IDs, browser tokens, cookie data or file paths. The counting policy flags only **candidate** `ai*Completed/Finished` names and `payload.status` values; matching a candidate does not certify the upstream protocol.
+
+If the previously captured private V3 file still exists on the Windows research computer, it may be inspected without exposing its contents:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\audit_brain_completion_metadata.py artifacts\brain_v3_private_content.jsonl
+```
+
+A file-not-found response simply means the optional local trace is absent. **Do not upload the trace** to GitHub, CI, ChatGPT, 9Router, screenshots or an issue. A zero candidate count does **not** mean ClickUp has no completion signal: the event could exist outside the captured WS frames, or under an unobserved name/shape. The tool is intentionally conservative and does not alter the live Gateway.
+
+The safe JSON aggregate counters can be shared for further interpretation, but they remain observational evidence and do not justify setting `finish_reason="stop"` or enabling real token streaming.
