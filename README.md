@@ -385,3 +385,31 @@ Cập nhật `git pull`, dừng gateway cũ bằng `Ctrl+C`, đóng Chromium đ�
 Tự điền `WORKSPACE_ID` từ URL Brain trên trình duyệt của bạn, không thêm `?conversationId`. Đây là Brain landing route, không khôi phục một chat cụ thể. Cơ chế API owner token vẫn hoạt động như trước. Khi restart gateway mới, token `.local/browser-owner.key` của worker cũ sẽ không dùng lại được: dừng worker cũ và xóa **riêng file owner key cũ** trước khi `--claim-session` lại. **Giữ nguyên** `.local/gateway.key` và `.local/browser-profile/` (lưu session trình duyệt).
 
 Xem [hướng dẫn và kiểm chứng](docs/17_STICKY_CONTEXT_EXCLUSIVE_SESSION.md).
+
+
+## 9Router / OpenAI-compatible basic text mode (optional)
+
+**NEW:** [`--router-mode`](docs/18_9ROUTER_BASIC_COMPAT.md) giữ nguyên các chế độ legacy và `--require-session` đã chạy live trước đó. Đây là một worker **riêng** cho 9Router trên cùng máy; **chưa kiểm thử kết nối 9Router thực tế**, nhưng JSON / buffered SSE và cô lập hội thoại đã qua mock CI.
+
+Mục tiêu: **text chat qua OpenAI Chat Completions**, không phải drop-in replacement cho Codex/Claude Code đầy đủ tool-calling. 9Router custom provider phải ở cùng máy chạy Chromium/gateway, cấu hình Base URL là `http://127.0.0.1:8787/v1`, model ID `clickup-ui-current`, API type `Chat Completions`, Authorization Bearer dùng `.local/gateway.key`.
+
+```powershell
+# PowerShell 1: dừng gateway cũ, giữ nguyên .local/gateway.key + browser profile.
+cd E:\Toolss\clickuptoapi
+git pull
+$env:CLICKUP_GATEWAY_API_KEY = (Get-Content -Raw .local\gateway.key).Trim()
+.\.venv\Scripts\python.exe tools\local_gateway.py --port 8787 --router-mode
+```
+
+Mở Brain trong Chromium và nhấn ENTER để bật server, sau đó PowerShell 2:
+
+```powershell
+.\.venv\Scripts\python.exe tools\check_router_compat.py
+.\.venv\Scripts\python.exe tools\check_router_compat.py --stream
+.\.venv\Scripts\python.exe tools\check_router_compat.py --history
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --diagnostics
+```
+
+`--router-mode` tự điều hướng tới Brain landing **mỗi request** để tách chat thay vì trộn lịch sử. Các messages có role khác `user` được **đóng gói thành transcript văn bản**, không có quyền system/developer thật. `stream=true` trả **SSE buffered một lần sau khi nhận phản hồi**; không streaming token realtime. Tool calling/multimodal/tùy chọn sampling/model switch không hỗ trợ và trả 422, token usage không bị bịa. **Không kết hợp `--router-mode` với `--require-session`** vì provider thông thường không gửi header owner đặc biệt. Không expose Internet và không dùng nhiều tài khoản.
+
+Mốc tiếp theo: phải kiểm thử smoke test live trên ClickUp và sau đó tạo provider node trong 9Router dashboard. Toàn bộ hướng dẫn và giới hạn: [docs/18_9ROUTER_BASIC_COMPAT.md](docs/18_9ROUTER_BASIC_COMPAT.md).
