@@ -130,6 +130,7 @@ def create_app(
         "http_chat_429": 0,
         "http_chat_502": 0,
         "http_chat_503": 0,
+        "http_chat_rejected_compiled_transcript_too_long": 0,
         # Categorize FastAPI 422 validation errors without keeping payloads.
         **{f"http_chat_rejected_{reason}": 0 for reason in REASON_CODES},
     }
@@ -311,9 +312,13 @@ def create_app(
             try:
                 prompt = flatten_messages(request.messages)
             except ValueError as exc:
+                http_counts["http_chat_rejected_compiled_transcript_too_long"] += 1
                 raise HTTPException(
                     status_code=422,
-                    detail="Compiled text transcript exceeds allowed size.",
+                    detail=(
+                        "Compiled text transcript exceeds the Gateway "
+                        "8000-character text-chat limit; no UI send occurred."
+                    ),
                 ) from exc
             answer = await run_one_prompt(prompt)
             if request.stream:
