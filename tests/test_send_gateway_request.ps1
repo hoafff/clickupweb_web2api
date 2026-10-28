@@ -3,8 +3,8 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:Calls = 0
-$script:ExpectedPrompt = 'Xin ch' + [char]0x00E0 + 'o'  # "Xin chao" with a-grave
+$global:GatewayMockCalls = 0
+$global:GatewayMockExpectedPrompt = 'Xin ch' + [char]0x00E0 + 'o'  # "Xin chao" with a-grave
 
 function Invoke-RestMethod {
     [CmdletBinding()]
@@ -15,7 +15,7 @@ function Invoke-RestMethod {
         [string]$ContentType,
         [byte[]]$Body
     )
-    $script:Calls += 1
+    $global:GatewayMockCalls += 1
 
     if ($Uri -ne 'http://127.0.0.1:8787/v1/chat/completions') {
         throw 'Unexpected destination URI'
@@ -34,7 +34,7 @@ function Invoke-RestMethod {
     if ($request.model -ne 'clickup-ui-current') {
         throw 'Incorrect model'
     }
-    if ($request.messages[0].content -cne $script:ExpectedPrompt) {
+    if ($request.messages[0].content -cne $global:GatewayMockExpectedPrompt) {
         throw 'Unicode prompt lost during JSON transport'
     }
     if ((-not ($Body -contains [byte]0xC3)) -or
@@ -48,8 +48,8 @@ $keyPath = Join-Path $env:TEMP ('brain-gateway-test-' + [guid]::NewGuid().ToStri
 try {
     'fixture-local-random-32-chars-abcdef' | Set-Content -LiteralPath $keyPath -Encoding Ascii
     $toolPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'tools\send_gateway_request.ps1'
-    $answer = & $toolPath -KeyFile $keyPath -Prompt $script:ExpectedPrompt -Port 8787
-    if ($script:Calls -ne 1) {
+    $answer = & $toolPath -KeyFile $keyPath -Prompt $global:GatewayMockExpectedPrompt -Port 8787
+    if ($global:GatewayMockCalls -ne 1) {
         throw 'Expected exactly one mocked HTTP call'
     }
     if ($answer -cne 'OK') {
