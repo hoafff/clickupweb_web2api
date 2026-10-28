@@ -243,6 +243,12 @@ async def _send_via_ui(
             raise BrowserAdapterError(
                 "Composer is not visible; no message was sent."
             )
+        # Confirm this is the editor observed in the Oct 28 Brain DOM trace.
+        # Never fill arbitrary divs if selectors become stale after a UI update.
+        if await composer.get_attribute("contenteditable") != "true":
+            raise BrowserAdapterError(
+                "Target is not the expected editable Brain composer; no message was sent."
+            )
         # ClickUp may render/enable the Send button only AFTER a draft exists.
         # Do not require the Send control to exist before filling the editor.
         await composer.fill(prompt, timeout=5_000)
@@ -262,6 +268,17 @@ async def _send_via_ui(
         if not await sender.is_enabled():
             raise BrowserAdapterError(
                 "Send control is disabled; draft may remain UNSENT."
+            )
+        # Fail closed if the provided selector resolves to an unrelated action.
+        # Values are verified from the researcher's real before/after DOM trace.
+        if (
+            await sender.get_attribute("data-test") != "refinement-prompt-submit-button"
+            or await sender.get_attribute("aria-label") != "Send"
+            or await sender.get_attribute("type") != "submit"
+        ):
+            raise BrowserAdapterError(
+                "Target is not the verified Brain Send button; "
+                "draft may remain UNSENT."
             )
         await sender.click(timeout=5_000)
     except PlaywrightError as exc:
