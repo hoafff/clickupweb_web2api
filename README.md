@@ -87,3 +87,32 @@ python tools/summarize_trace.py artifacts/brain_v2.jsonl --json
 ```
 
 `--capture-ws-schema` là tùy chọn: chỉ lưu **JSON key paths** của WebSocket frame, không lưu giá trị/body. Đã tăng cường mask segment chữ+số dạng opaque IDs trong URL. Marker cho phép liên kết request sau mỗi lần tương tác UI. **Không đẩy file trace hay browser profile lên repo public.**
+
+
+## Thử nghiệm Thinking Effort và capture JSON (v3)
+
+Ảnh UI cho thấy Claude Opus 5.5 có Thinking Effort `Auto`, `Low`, `Medium`. Để so sánh request giữa các mức này, chạy:
+
+```powershell
+git pull
+.\.venv\Scripts\python.exe tools\trace_browser.py --url https://app.clickup.com/ --capture-ws-schema --capture-content --output artifacts\brain_v3_meta.jsonl --content-output artifacts\brain_v3_private_content.jsonl
+```
+
+Nhập marker trong **PowerShell** trước khi thao tác trên UI, rồi mới gửi prompt. Quy trình:
+
+| Marker | ClickUp action |
+|---|---|
+| `mark max_first` | New Chat, chọn Max, gửi `Trả lời đúng một từ: OK` |
+| `mark max_followup` | Trong chat Max, gửi `Vừa rồi tôi yêu cầu gì?` |
+| `mark opus_switch` | Trong cùng chat, đổi sang Opus 5.5 Medium và gửi một tin |
+| `mark opus_auto` | New Chat, Opus 5.5 Auto, gửi `Trả lời đúng một từ: OK` |
+| `mark opus_low` | New Chat, Opus 5.5 Low, gửi cùng prompt |
+| `mark opus_medium` | New Chat, Opus 5.5 Medium, gửi cùng prompt |
+
+**New Chat riêng cho từng effort** giúp loại bớt ảnh hưởng conversation history. Mỗi lần nhập marker rồi Enter, tracer ghi mốc thời gian; tiếp tục thao tác UI bình thường. Đợi đủ phản hồi rồi nhấn Enter trống để kết thúc.
+
+```powershell
+.\.venv\Scripts\python.exe tools\summarize_trace.py artifacts\brain_v3_meta.jsonl --json > artifacts\brain_v3_summary.json
+```
+
+`brain_v3_meta.jsonl` chứa metadata, `brain_v3_private_content.jsonl` chứa nội dung JSON HTTP/WS/SSE **có redaction theo key**, từ lúc marker đầu tiên. Chỉ capture nội dung JSON text nhỏ hơn giới hạn mặc định 192 KiB/response; không capture file binary/HTML/raw HAR. Bộ lọc secret **không bảo đảm loại hết thông tin nhạy cảm**, đặc biệt các giá trị không có tên trường rõ ràng: giữ file private trên máy, xem lại trước khi chia sẻ và không commit lên GitHub. Tracer không tự login hay gửi prompt.
