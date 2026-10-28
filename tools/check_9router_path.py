@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import sys
 from typing import Any
 import urllib.error
@@ -171,7 +172,24 @@ def request_router(
             f"9Router HTTP {exc.code}.{qualifier} "
             "Inspect router-side request logs and Gateway diagnostics."
         ) from exc
-    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+    except urllib.error.URLError as exc:
+        # The request may have reached the UI before a client read timeout.
+        # Do not retry an ambiguous send; classify without echoing exception
+        # reason (which may contain a private URL or upstream details).
+        if isinstance(getattr(exc, "reason", None), (TimeoutError, socket.timeout)):
+            raise RouterPathError(
+                "9Router response timed out after request; the UI may already "
+                "have submitted it. Inspect browser before any retry."
+            ) from exc
+        raise RouterPathError(
+            "Cannot reach local 9Router. Check 127.0.0.1:20128 and its process."
+        ) from exc
+    except (OSError, TimeoutError) as exc:
+        if isinstance(exc, (TimeoutError, socket.timeout)):
+            raise RouterPathError(
+                "9Router response timed out after request; the UI may already "
+                "have submitted it. Inspect browser before any retry."
+            ) from exc
         raise RouterPathError(
             "Cannot reach local 9Router. Check 127.0.0.1:20128 and its process."
         ) from exc
