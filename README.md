@@ -159,3 +159,22 @@ git pull
 ```
 
 Replay không có network access; chỉ xuất tổng số event/matches. Lần chạy trên trace V3 **chưa được thực hiện trong môi trường GitHub** (dữ liệu riêng tư không commit). Kỳ vọng 8 matches dựa trên decoder V3 người dùng đã chạy thành công. Không đồng nhất `reply_created` với model completion hay token streaming. Gateway và adapter live chưa được triển khai.
+
+
+## Windows troubleshooting: `ModuleNotFoundError: No module named 'tools'`
+
+Nếu dùng bản cũ của `tools/replay_brain_events.py` và gặp lỗi import khi chạy trực tiếp, có thể dùng module mode từ **thư mục gốc repository**:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+.\.venv\Scripts\python.exe -m tools.replay_brain_events artifacts\brain_v3_private_content.jsonl --expected 8
+```
+
+Đã sửa lỗi gốc: entrypoint `tools/replay_brain_events.py` hiện bootstrap repository root vào Python import path nếu chạy trực tiếp, nên sau `git pull` cả hai cách đều hỗ trợ:
+
+```powershell
+git pull
+.\.venv\Scripts\python.exe tools\replay_brain_events.py artifacts\brain_v3_private_content.jsonl --expected 8
+```
+
+CI chạy **subprocess thực tế** để kiểm thử cả direct-script và `-m` mode trên một trace giả, không cần truy cập ClickUp. Kết quả `matched=8` trên dữ liệu riêng của người dùng vẫn chỉ được xác nhận sau khi người dùng chạy lệnh với file V3 local.
