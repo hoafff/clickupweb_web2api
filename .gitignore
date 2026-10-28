@@ -1,0 +1,37 @@
+# Sensitive browser/session data and network captures
+.local/
+artifacts/
+*.har
+*.trace
+*.webm
+*.zip
+*.storage-state.json
+browser-profile/
+user-data-dir/
+
+# Keys, tokens, private configuration
+.env
+.env.*
+!.env.example
+*secret*.json
+credentials.json
+tokens.json
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+dist/
+build/
+*.egg-info/
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
