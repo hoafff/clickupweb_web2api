@@ -147,6 +147,11 @@ def main(argv: list[str] | None = None) -> int:
         key = load_key(args.key_file)
         # Require a read-only baseline before optionally consuming AI credits.
         baseline = get_snapshot(port=args.port, key=key)
+        if args.drive_router and not baseline["page_is_brain"]:
+            raise ResearchProbeError(
+                "Browser is not on ClickUp Brain; open Brain before sending "
+                "the optional research prompt."
+            )
         if args.snapshot or (not args.watch and not args.drive_router):
             print(json.dumps(baseline, indent=2))
             print("UI hints are NOT generation-complete evidence.")
