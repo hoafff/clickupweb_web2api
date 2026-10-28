@@ -50,6 +50,7 @@ from tools.brain_start_url import (
 from tools.router_compat import (
     RouterChatRequest, flatten_messages, make_chat_completion, make_buffered_sse,
 )
+from tools.prompt_limits import MAX_PROMPT_CHARS
 from tools.brain_ui_state_probe import BRAIN_UI_STATE_JS, sanitize_ui_snapshot
 from tools.router_validation import (
     REASON_CODES, reason_from_errors, safe_validation_body,
@@ -62,7 +63,6 @@ from tools.session_lease import (
 MODEL_ID = "clickup-ui-current"
 COMPOSER_CSS = 'div[contenteditable="true"]'
 SEND_CSS = 'button[data-test="refinement-prompt-submit-button"]'
-MAX_PROMPT_CHARS = 8_000
 
 
 class GatewayBusyError(Exception):
@@ -317,7 +317,7 @@ def create_app(
                     status_code=422,
                     detail=(
                         "Compiled text transcript exceeds the Gateway "
-                        "8000-character text-chat limit; no UI send occurred."
+                        f"{MAX_PROMPT_CHARS}-character text-chat limit; no UI send occurred."
                     ),
                 ) from exc
             answer = await run_one_prompt(prompt)
