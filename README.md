@@ -413,3 +413,21 @@ Mở Brain trong Chromium và nhấn ENTER để bật server, sau đó PowerShe
 `--router-mode` tự điều hướng tới Brain landing **mỗi request** để tách chat thay vì trộn lịch sử. Các messages có role khác `user` được **đóng gói thành transcript văn bản**, không có quyền system/developer thật. `stream=true` trả **SSE buffered một lần sau khi nhận phản hồi**; không streaming token realtime. Tool calling/multimodal/tùy chọn sampling/model switch không hỗ trợ và trả 422, token usage không bị bịa. **Không kết hợp `--router-mode` với `--require-session`** vì provider thông thường không gửi header owner đặc biệt. Không expose Internet và không dùng nhiều tài khoản.
 
 Mốc tiếp theo: phải kiểm thử smoke test live trên ClickUp và sau đó tạo provider node trong 9Router dashboard. Toàn bộ hướng dẫn và giới hạn: [docs/18_9ROUTER_BASIC_COMPAT.md](docs/18_9ROUTER_BASIC_COMPAT.md).
+
+
+### 9Router smoke test — live JSON/history PASS, SSE CLI false negative fixed
+
+Trên ClickUp Browser Gateway live, người nghiên cứu đã chạy `check_router_compat.py`: JSON text trả `OK`, `--history` trả `ALPHA`; `--diagnostics` cho `completed_replies=3`, `same_conversation_pairs=0`, `different_conversation_pairs=2`. Ba request đã tạo ba reply/conversation khác nhau. **Lượt SSE smoke ban đầu báo fail nhưng vẫn tăng completed_replies**, nên cần kiểm tra client/parser thay vì kết luận Brain không trả lời.
+
+**Nguyên nhân đã phát hiện trong code:** smoke CLI convert `response.headers` thành `dict` rồi tìm key `"X-Stream-Mode"`, trong khi Uvicorn gửi lowercase `"x-stream-mode"`. Đã sửa bằng chuẩn hóa tên HTTP header về lowercase, thêm regression tests với **synthetic HTTP server** trên Windows/Linux. **SSE live retry chưa được xác nhận.**
+
+Không cần restart gateway vì fix nằm ở tool CLI. PowerShell 2:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\check_router_compat.py --stream
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --diagnostics
+```
+
+Lưu ý: `--stream` tạo một **prompt thật** và có thể tốn hạn mức. API trả SSE **buffered**, không có token streaming realtime. Sau khi test thành công mới chuyển sang kiểm chứng node Custom OpenAI Compatible trong 9Router trên **cùng máy**, xem [hướng dẫn](docs/18_9ROUTER_BASIC_COMPAT.md).
