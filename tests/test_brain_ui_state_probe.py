@@ -20,7 +20,8 @@ from tools.brain_ui_state_probe import (
     BOOLEAN_FIELDS, COUNT_FIELDS, BRAIN_UI_STATE_JS, sanitize_ui_snapshot,
 )
 from tools.check_brain_ui_state import (
-    ResearchProbeError, collect, get_snapshot, main, summarise,
+    ResearchProbeError, classify_router_failure, collect, get_snapshot, main,
+    observe_transitions, summarise,
 )
 from tools.local_gateway import create_app
 
@@ -95,6 +96,35 @@ class UIStateUnitTests(unittest.TestCase):
         self.assertNotIn(".value", BRAIN_UI_STATE_JS)
         self.assertNotIn("fetch(", BRAIN_UI_STATE_JS)
         self.assertNotIn("click(", BRAIN_UI_STATE_JS)
+
+    def test_safe_router_error_categories_and_stop_transitions(self):
+        from tools.check_9router_path import RouterPathError
+        code = classify_router_failure(RouterPathError(
+            "9Router HTTP 502. PRIVATE_RESPONSE_NOT_TO_ECHO"
+        ))
+        self.assertEqual(code, {
+            "router_error_category": "http_error", "router_http_status": 502,
+        })
+        timed = classify_router_failure(RouterPathError(
+            "9Router response timed out after request; PRIVATE_TOKEN"
+        ))
+        self.assertEqual(timed["router_error_category"], "client_read_timeout")
+        self.assertNotIn("PRIVATE_TOKEN", json.dumps(timed))
+        self.assertEqual(
+            observe_transitions([
+                {**SAMPLE, "stop_near_composer_count": 0},
+                SAMPLE,
+                SAMPLE,
+                {**SAMPLE, "stop_near_composer_count": 0},
+            ]),
+            {
+                "stop_appearance_transitions": 1,
+                "stop_disappearance_transitions": 1,
+                "stop_visible_first_sample": False,
+                "stop_visible_last_sample": False,
+                "stop_ever_visible": True,
+            },
+        )
 
     def test_summary_restricts_output_to_fixed_keys_and_counts(self):
         changed = {**SAMPLE, "stop_candidate_count": 0,
@@ -220,6 +250,41 @@ class UIResearchClientLoopbackTests(unittest.TestCase):
         self.assertEqual(len(seen), 3)
         self.assertEqual(fails, 0)
         self.assertEqual(summarise(seen, fails)["samples"], 3)
+
+    def test_drive_router_reports_status_and_post_request_state_without_body(self):
+        from tools.check_9router_path import RouterPathError
+        from tools.check_brain_ui_state import main
+        with tempfile.TemporaryDirectory(prefix="safe-ui-research-") as folder:
+            key = Path(folder) / "gateway.key"
+            key.write_text(KEY + "\n", encoding="ascii")
+            fake_router_error = RouterPathError(
+                "9Router HTTP 504. PRIVATE_SERVER_BODY_MUST_NOT_LEAK"
+            )
+            with patch("tools.check_brain_ui_state.get_snapshot",
+                       return_value=SAMPLE), \
+                 patch("tools.check_brain_ui_state.read_key",
+                       return_value="fixture-only-separate-client-key"), \
+                 patch("tools.check_brain_ui_state.reject_reused_upstream_key"), \
+                 patch("tools.check_brain_ui_state.chat_once",
+                       side_effect=fake_router_error), \
+                 patch("tools.check_brain_ui_state.time.sleep"):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with contextlib.redirect_stdout(stdout), \
+                        contextlib.redirect_stderr(stderr):
+                    code = main([
+                        "--drive-router", "--samples", "4", "--interval", "0.2",
+                        "--key-file", str(key), "--port", str(self.port),
+                    ])
+            self.assertEqual(code, 1)
+            output = stdout.getvalue()
+            self.assertIn('"router_http_status": 504', output)
+            self.assertIn('"router_request_outcome": "error"', output)
+            self.assertIn('"post_request_stop_near_composer": true', output)
+            self.assertIn('"post_request_snapshot_ok": true', output)
+            self.assertNotIn("PRIVATE_SERVER_BODY", output + stderr.getvalue())
+            self.assertNotIn("fixture-only-separate-client-key", output + stderr.getvalue())
+            self.assertIn("Do NOT retry blindly", stderr.getvalue())
 
     def test_cli_snapshot_and_watch_no_prompt(self):
         import contextlib
