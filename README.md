@@ -68,7 +68,9 @@ Trình duyệt mở ở chế độ nhìn thấy được. Đăng nhập bằng 
 - [x] Xác minh HTTP chat command, selectedModel/selectedReasoningLevel và WS reply-created event trên V3; **chưa xác minh full inference/streaming transport**.
 - [x] Xây và kiểm thử offline conversation correlator; **chưa có browser/protocol adapter gửi prompt**.
 - [x] Triển khai Browser Adapter prototype (manual + opt-in CSS send), kiểm thử offline bằng fake WS/UI.
-- [ ] Kiểm thử live Browser Adapter gửi và nhận qua ClickUp Brain UI trên phiên đăng nhập được ủy quyền.
+- [x] Kiểm thử live Browser Adapter (manual UI send → WS reply) với phiên được ủy quyền: nhận 1/1 reply "OK".
+- [x] Bổ sung read-only DOM inspector để khám phá CSS selector; mới kiểm thử fixture/CI.
+- [ ] Auto-send Playwright với CSS selector đã xác minh qua DOM thực tế (không đoán nút Send).
 - [ ] Demo OpenAI-compatible JSON/SSE, kiểm thử multi-model, quota và tính ổn định.
 
 ## Nguồn
@@ -193,3 +195,17 @@ git pull
 Khi Chromium mở: đăng nhập/mở Brain², chọn model, bảo đảm không còn câu trả lời đang chạy. Quay lại PowerShell nhấn ENTER để **arm**. Sau đó gửi **đúng một** tin trong Browser. Adapter lắng nghe `/ws`, ghép `aiConversationStarted` → `chatCommentCreated`, in độ dài văn bản, không in prompt hoặc trả lời. Thêm `--show-reply` nếu muốn hiển thị nội dung trả lời riêng trên console.
 
 `--mode auto --confirm-send --composer-selector ... --send-selector ...` cũng đã có nhưng **chưa kiểm thử DOM thật**; chỉ sử dụng khi tự xác minh CSS selector trên Browser. Không suy diễn selector từ ảnh hoặc trace network. CI chỉ kiểm thử offline mock trên Ubuntu/Windows; **live E2E, API gateway và server-side model execution chưa được xác minh**.
+
+
+## Live Browser Adapter đã PASS — chuẩn bị auto-send
+
+Người thực hiện đã chạy `browser_adapter.py --mode manual` trên Chromium đăng nhập ClickUp và nhận `SUCCESS`: 1 WS connection, 12 JSON WS frames, 1/1 matched AI reply, nội dung `OK`. Đây là kiểm chứng receiving path **live**, khác với offline replay; **không** chứng minh auto-send đã chạy hoặc có server/gateway API độc lập.
+
+Để nhận diện composer và nút Send từ DOM **không chụp nội dung chat**, xem [hướng dẫn inspector](docs/14_UI_SELECTOR_INSPECTION.md):
+
+```powershell
+git pull
+.\.venv\Scripts\python.exe tools\inspect_brain_ui.py
+```
+
+Mở đúng ClickUp Brain UI, nhấn ENTER trong terminal. Tool in `visible_editors` và `nearby_buttons` kèm vị trí `rect`, `aria-label`, `placeholder`, `data-testid` và CSS selector được kiểm tra unique. **Không tự động gửi tin nhắn.** User cần kiểm tra lại selector trong trình duyệt trước khi dùng `browser_adapter.py --mode auto --confirm-send`. Không gửi browser profile, cookie hoặc dữ liệu workspace riêng tư.
