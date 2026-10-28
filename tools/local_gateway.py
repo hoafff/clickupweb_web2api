@@ -119,6 +119,12 @@ def create_app(
         "http_chat_2xx": 0,
         "http_chat_401": 0,
         "http_chat_other_errors": 0,
+        # Safe status counters for failed attempts. Raw requests and error
+        # bodies are NEVER stored; 422/429 can occur BEFORE a UI send.
+        "http_chat_422": 0,
+        "http_chat_429": 0,
+        "http_chat_502": 0,
+        "http_chat_503": 0,
     }
 
     @app.middleware("http")
@@ -136,12 +142,15 @@ def create_app(
                 http_counts["http_chat_other_errors"] += 1
             raise
         if track:
-            if 200 <= response.status_code < 300:
+            code = response.status_code
+            if 200 <= code < 300:
                 http_counts["http_chat_2xx"] += 1
-            elif response.status_code == 401:
+            elif code == 401:
                 http_counts["http_chat_401"] += 1
-            elif response.status_code >= 400:
+            elif code >= 400:
                 http_counts["http_chat_other_errors"] += 1
+                if code in (422, 429, 502, 503):
+                    http_counts[f"http_chat_{code}"] += 1
         return response
 
     def require_api_key(authorization: str | None = Header(default=None)) -> None:
