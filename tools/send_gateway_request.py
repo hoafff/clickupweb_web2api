@@ -23,12 +23,18 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+if __package__ in (None, ""):
+    _root = Path(__file__).resolve().parents[1]
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+
+from tools.prompt_limits import MAX_PROMPT_CHARS
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_KEY_FILE = PROJECT_ROOT / ".local" / "gateway.key"
 DEFAULT_SESSION_FILE = PROJECT_ROOT / ".local" / "browser-owner.key"
 DEFAULT_PROMPT = "Reply with exactly one word: OK"
 MODEL_ID = "clickup-ui-current"
-MAX_PROMPT_CHARS = 8_000
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
 DIAGNOSTIC_FIELDS = (
@@ -104,7 +110,7 @@ def write_session_token_once(path: Path, token: str) -> None:
 
 def encode_request(prompt: str) -> bytes:
     if not prompt.strip() or len(prompt) > MAX_PROMPT_CHARS:
-        raise LocalClientError("Prompt must contain 1..8000 non-blank characters.")
+        raise LocalClientError(f"Prompt must contain 1..{MAX_PROMPT_CHARS} non-blank characters.")
     body = {
         "model": MODEL_ID,
         "messages": [{"role": "user", "content": prompt}],
