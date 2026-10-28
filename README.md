@@ -612,3 +612,25 @@ Confirm ClickUp Brain in the visible browser and press ENTER. On PowerShell 2:
 ```
 
 Only share the fixed-key JSON summary. **Do not** share keys, trace JSONL, Chromium profile or private browser logs. UI Stop/Generating hints can be absent due to selectors/language, or present for unrelated controls. They do not establish a final-generation signal. Full work plan, safeguards, expected limitations: [docs/21_UI_COMPLETION_RESEARCH.md](docs/21_UI_COMPLETION_RESEARCH.md).
+
+## 2026-10-28 — First live UI Stop control observation and safe router error diagnostics
+
+Operator verified an authorized live Brain² page `--snapshot`: idle `stop_candidate_count=0`. One explicit `check_brain_ui_state.py --drive-router --samples 70 --interval 0.35` produced **49 of 71 UI samples with a Stop-like control near the composer**, with eight distinct UI-state shapes and zero failed metadata polls. The browser visibly received and rendered the test prompt. **BUT** the 9Router caller reported `9Router benign text request failed`; the previous CLI obscured the cause.
+
+Fixed the **research CLI**, not the production Gateway response behavior:
+
+- Classify 9Router HTTP status **numerically** without logging private error bodies; distinguish socket read timeouts where possible.
+- Record elapsed request duration, Stop appearance/disappearance counts and a post-request, read-only UI snapshot.
+- Allow up to 480 samples; 70 at 0.35 seconds (~25 seconds) may end before a long Brain reply.
+- Refuse to automatically retry a request that already appeared in the browser; the Gateway may be degraded after an ambiguous send.
+
+Run **without sending another prompt** after `git pull`:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\check_brain_ui_state.py --snapshot
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --diagnostics
+```
+
+Only when the browser and Gateway are healthy **and you choose to spend one more real test request**, consider `check_brain_ui_state.py --drive-router --samples 360 --interval 0.5`. That will report a safe router status/timeout category. **Do not equate Stop disappearing with an upstream generation-complete event.** See [docs/21_UI_COMPLETION_RESEARCH.md](docs/21_UI_COMPLETION_RESEARCH.md).
