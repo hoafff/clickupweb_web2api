@@ -70,7 +70,8 @@ Trình duyệt mở ở chế độ nhìn thấy được. Đăng nhập bằng 
 - [x] Triển khai Browser Adapter prototype (manual + opt-in CSS send), kiểm thử offline bằng fake WS/UI.
 - [x] Kiểm thử live Browser Adapter (manual UI send → WS reply) với phiên được ủy quyền: nhận 1/1 reply "OK".
 - [x] Bổ sung read-only DOM inspector để khám phá CSS selector; mới kiểm thử fixture/CI.
-- [ ] Auto-send Playwright với CSS selector đã xác minh qua DOM thực tế (không đoán nút Send).
+- [x] Xác minh editor + Send selector từ DOM thực tế sau khi nhập bản nháp (11 → 12 nearby buttons).
+- [ ] Auto-send Playwright trên ClickUp live: chờ người nghiên cứu chạy một lượt với selector đã xác minh.
 - [ ] Demo OpenAI-compatible JSON/SSE, kiểm thử multi-model, quota và tính ổn định.
 
 ## Nguồn
@@ -225,3 +226,15 @@ git pull
 Nhấn Enter trong **PowerShell** lần 1 khi editor trống. Gõ `OK` trong editor của **Chromium**, **đừng Enter/click Send trên web**. Quay lại PowerShell nhấn Enter lần 2. Chỉ gửi output của `difference`, `visible_editors` và `nearby_buttons_after_draft` đã kiểm tra dữ liệu riêng tư. Tool so sánh nút mới xuất hiện/nút được enable, vẫn phải xác minh icon Send bằng mắt.
 
 `_send_via_ui()` cũng đã được sửa để **điền prompt trước rồi mới chờ nút Send hiện lên**, và từ chối click khi selector không đúng duy nhất/visible/enabled. Auto-send chưa được xác thực live.
+
+### Verified Send button — one-message auto E2E test
+
+Đã quan sát **Send hiện lên sau khi nhập text**, với `data-test=refinement-prompt-submit-button`, `aria-label=Send`, `type=submit`; editor `div[contenteditable=true]`. Auto mode đã thêm fail-closed checks cho đúng các thuộc tính này và không click trước khi nút xuất hiện. Đây là **code đã kiểm thử mock**, không phải live auto E2E đã PASS.
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\browser_adapter.py --mode auto --confirm-send --composer-selector 'div[contenteditable="true"]' --send-selector 'button[data-test="refinement-prompt-submit-button"]' --timeout 120 --show-reply
+```
+
+Đóng Chromium cũ, mở Brain Ask trong Chromium mới, để trống editor. Nhấn Enter trong PowerShell ở bước arm, sau đó nhập `Trả lời đúng một từ: OK` khi chương trình hỏi prompt rồi nhấn Enter. **Không tự click Send bằng tay**; script sẽ fill và submit 1 lần. Nếu DOM thay đổi, tool dừng với thông báo lỗi. Xem [kết quả DOM và hướng dẫn](docs/14_UI_SELECTOR_INSPECTION.md).
