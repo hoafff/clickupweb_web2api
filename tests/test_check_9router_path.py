@@ -56,7 +56,10 @@ class Fake9Router(BaseHTTPRequestHandler):
             self.json_response(404, {})
             return
         if self.headers.get("Authorization") != f"Bearer {KEY}":
-            self.json_response(401, {})
+            self.json_response(401, {"error": {
+                "type": "authentication_error", "code": "invalid_api_key",
+                "message": "Invalid API key",
+            }})
             return
         length = int(self.headers.get("Content-Length", "0"))
         request = json.loads(self.rfile.read(length).decode("utf-8"))
@@ -147,6 +150,16 @@ class RouterPathTests(unittest.TestCase):
         self.assertIn("HTTP 401", unauth.stderr)
         self.assertNotIn("private-key-never-echo", unauth.stderr)
         self.assertNotIn(KEY, unauth.stdout + unauth.stderr)
+
+    def test_rejected_chat_key_reports_only_safe_marker(self):
+        with self.assertRaisesRegex(RouterPathError, "invalid_api_key") as cm:
+            request_router(
+                port=self.port, path="/v1/chat/completions", key="wrong",
+                body={"model": MODEL,
+                      "messages": [{"role": "user", "content": "OK"}],
+                      "stream": False},
+            )
+        self.assertNotIn(KEY, str(cm.exception))
 
     def test_allowlisted_401_diagnostics_never_echo_secrets(self):
         examples = [
