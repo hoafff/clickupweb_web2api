@@ -39,7 +39,13 @@ def request_local(path: str, key: str, body: dict | None, port: int):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(req, timeout=150) as response:
         text = response.read(2_000_000).decode("utf-8")
-        return response.status, dict(response.headers), text
+        # HTTP header names are CASE-INSENSITIVE (RFC 9110).
+        # uvicorn commonly sends "x-stream-mode" in lowercase, while a
+        # plain dict has case-sensitive .get(). Normalize before checking.
+        normalized_headers = {
+            key.lower(): value for key, value in response.headers.items()
+        }
+        return response.status, normalized_headers, text
 
 
 def parse_sse_result(text: str) -> str:
@@ -92,8 +98,12 @@ def main() -> int:
         if status != 200:
             raise ValueError("Unexpected HTTP response status")
         if args.stream:
-            if headers.get("X-Stream-Mode") != "buffered":
+            if headers.get("x-stream-mode") != "buffered":
                 raise ValueError("Missing buffered SSE disclosure header.")
+            if not headers.get("content-type", "").lower().startswith(
+                "text/event-stream"
+            ):
+                raise ValueError("Invalid SSE response content-type.")
             answer = parse_sse_result(body)
             print("Buffered SSE: PASS (NOT real token-level streaming)")
         else:
