@@ -29,7 +29,9 @@ if __package__ in (None, ""):
         sys.path.insert(0, str(_root))
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from playwright.async_api import Error as PlaywrightError, async_playwright
 
@@ -49,6 +51,9 @@ from tools.router_compat import (
     RouterChatRequest, flatten_messages, make_chat_completion, make_buffered_sse,
 )
 from tools.brain_ui_state_probe import BRAIN_UI_STATE_JS, sanitize_ui_snapshot
+from tools.router_validation import (
+    REASON_CODES, reason_from_errors, safe_validation_body,
+)
 from tools.session_lease import (
     ExclusiveSessionLease, SessionAlreadyClaimedError,
     SessionNotClaimedError, SessionAccessDeniedError,
@@ -125,7 +130,25 @@ def create_app(
         "http_chat_429": 0,
         "http_chat_502": 0,
         "http_chat_503": 0,
+        # Categorize FastAPI 422 validation errors without keeping payloads.
+        **{f"http_chat_rejected_{reason}": 0 for reason in REASON_CODES},
     }
+
+    @app.exception_handler(RequestValidationError)
+    async def sanitized_request_validation(
+        request: Request, error: RequestValidationError,
+    ) -> JSONResponse:
+        reason = reason_from_errors(error.errors())
+        if (
+            request.method == "POST"
+            and request.url.path == "/v1/chat/completions"
+        ):
+            http_counts[f"http_chat_rejected_{reason}"] += 1
+        # Never serialize error.errors(): Pydantic includes 'input',
+        # which can be an agent's entire confidential system prompt.
+        return JSONResponse(
+            status_code=422, content=safe_validation_body(reason),
+        )
 
     @app.middleware("http")
     async def count_chat_requests(request: Request, call_next):
