@@ -228,6 +228,34 @@ class GatewayHTTPTests(unittest.TestCase):
             self.assertEqual(response.status_code, status)
             self.assertNotIn("Reply OK", response.text)
 
+    def test_safe_status_breakdown_distinguishes_422_429_502_503(self):
+        invalid = {**VALID, "messages": []}
+        self.assertEqual(
+            self.client.post("/v1/chat/completions", headers=AUTH, json=invalid).status_code,
+            422,
+        )
+        for error, status_code in [
+            (GatewayBusyError, 429),
+            (GatewaySendError, 502),
+            (GatewayUnavailableError, 503),
+        ]:
+            with self.subTest(error=error.__name__):
+                self.engine.error = error
+                result = self.client.post(
+                    "/v1/chat/completions", headers=AUTH, json=VALID,
+                )
+                self.assertEqual(result.status_code, status_code)
+        diagnostics = self.client.get(
+            "/v1/session/diagnostics", headers=AUTH,
+        ).json()
+        for status_code in (422, 429, 502, 503):
+            self.assertEqual(diagnostics[f"http_chat_{status_code}"], 1)
+        self.assertEqual(diagnostics["http_chat_other_errors"], 4)
+        self.assertEqual(diagnostics["http_chat_received"], 4)
+        self.assertEqual(diagnostics["http_chat_2xx"], 0)
+        self.assertNotIn(KEY, str(diagnostics))
+        self.assertNotIn("conversation_id", str(diagnostics))
+
     def test_private_endpoint_host_and_docs(self):
         self.assertEqual(self.client.get("/docs").status_code, 404)
         status = self.client.get("/healthz")
