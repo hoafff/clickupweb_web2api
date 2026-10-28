@@ -14,6 +14,7 @@ Khảo sát các mã nguồn mở chuyển ứng dụng hội thoại web thành
 2. [Tính khả thi với Brain²](docs/02_CLICKUP_BRAIN_FEASIBILITY.md) — cái gì biết từ ảnh/tài liệu; cái gì chỉ là giả thuyết; điều kiện pháp lý/kỹ thuật.
 3. [Kiến trúc & lộ trình POC](docs/03_ARCHITECTURE_AND_POC_PLAN.md) — kiến trúc phân tầng, API contract, lỗi, kiểm thử và mốc quyết định.
 4. [Phiếu khảo sát bảo mật](docs/04_OBSERVATION_WORKSHEET.md) — biểu mẫu kiểm chứng với môi trường được phép, không ghi bí mật.
+5. [Multi-model Brain²](docs/05_MULTI_MODEL_SUPPORT.md) — Max, ChatGPT, Claude, Gemini; discovery, model switch và khả năng từng model.
 
 ## Phân biệt 3 hướng
 
