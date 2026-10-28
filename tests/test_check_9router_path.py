@@ -179,8 +179,10 @@ class RouterPathTests(unittest.TestCase):
 
     def test_default_api_key_file_is_optional_but_not_silently_fabricated(self):
         self.assertIsNone(read_key(Path(self.tmp.name) / "no-key"))
+        empty_key = Path(self.tmp.name) / "empty.key"
+        empty_key.write_text("\n", encoding="ascii")
         with self.assertRaises(RouterPathError):
-            read_key(Path(self.tmp.name))
+            read_key(empty_key)
 
 
 if __name__ == "__main__":
