@@ -45,17 +45,28 @@ Requires Python 3.11+ and Playwright Chromium already installed during V3 testin
 
 ## 3. Start the gateway
 
-Set a **unique, random local key** (at least 24 characters), **do not upload or commit it**, then:
+Create a **unique, random local key** (at least 24 characters) in a **Git-ignored local file**. This allows two PowerShell terminals to use the same key without printing it. The file contains a **plaintext credential**: only use a trusted machine, protect your user profile, and **never share or upload it**.
 
 ```powershell
-# Example generates a random 32-byte key in the PowerShell session.
-$env:CLICKUP_GATEWAY_API_KEY = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
+New-Item -ItemType Directory -Force .local | Out-Null
+if (-not (Test-Path .local\gateway.key)) {
+  .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))" |
+    Set-Content -Encoding Ascii .local\gateway.key
+}
+$env:CLICKUP_GATEWAY_API_KEY = (Get-Content -Raw .local\gateway.key).Trim()
 .\.venv\Scripts\python.exe tools\local_gateway.py --port 8787 --timeout 120
 ```
 
 Chromium starts visible. Log in as usual, open Brain² Ask, manually select the model and Thinking Effort you want. Ensure the editor is empty and **no prior AI generation is in progress**. Press Enter **in the gateway terminal** when ready. The gateway then starts listening on **127.0.0.1 only**.
 
-**Local API authentication:** Use the **same** value of `CLICKUP_GATEWAY_API_KEY` in the calling client process. The key is not printed by the gateway. In a second PowerShell terminal, you may set `$env:CLICKUP_GATEWAY_API_KEY` to the same locally stored secret; do not post it in screenshots, chat or GitHub. You can choose an existing secure local password manager to share the value between terminal sessions.
+**Local API authentication:** Use the **same** `CLICKUP_GATEWAY_API_KEY` in the calling process. The gateway never prints it. In the **second PowerShell terminal**, run the following **before** the HTTP request:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+$env:CLICKUP_GATEWAY_API_KEY = (Get-Content -Raw .local\gateway.key).Trim()
+```
+
+`.local/gateway.key` is ignored by Git but is **not encrypted**. Avoid screenshots that display the file or its contents. If compromised, delete the file and create a new key while gateway is stopped.
 
 ## 4. First HTTP request
 
