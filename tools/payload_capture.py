@@ -20,7 +20,8 @@ TOKEN_KEY = re.compile(
     r"(?:^|[_\-])(?:"
     r"authorization|cookie|set_cookie|access_token|refresh_token|id_token|"
     r"token|csrf|xsrf|session_token|session_key|secret|password|passwd|"
-    r"credential|private_key|api_key|jwt|bearer|auth_header|headers"
+    r"credential|private_key|api_key|jwt|bearer|auth_header|headers|"
+    r"session_id|write_key|sessionid|writekey"
     r")(?:$|[_\-])",
     re.IGNORECASE,
 )
@@ -35,7 +36,8 @@ URL_KEY = re.compile(r"^(?:url|uri|href|link|redirect_uri|asset_url|image_url)$"
 CAMEL_SECRET_KEY = re.compile(
     r"^(?:accessToken|refreshToken|idToken|authToken|sessionToken|sessionKey|"
     r"csrfToken|xsrfToken|apiKey|clientSecret|privateKey|authHeader|"
-    r"requestHeaders|jwtToken)$",
+    r"requestHeaders|jwtToken|writeKey|sessionId|aiSessionId|"
+    r"analyticsSessionId)$",
     re.IGNORECASE,
 )
 
