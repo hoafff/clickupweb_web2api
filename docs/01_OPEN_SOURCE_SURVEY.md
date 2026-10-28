@@ -12,7 +12,7 @@
 | [Amitk003/chatgpt-web-to-api-expose-reverse-engineering](https://github.com/Amitk003/chatgpt-web-to-api-expose-reverse-engineering) | Hai đường độc lập: DOM automation và direct HTTP protocol | [browser.py](https://github.com/Amitk003/chatgpt-web-to-api-expose-reverse-engineering/blob/main/chatgpt/browser.py); [driver.py](https://github.com/Amitk003/chatgpt-web-to-api-expose-reverse-engineering/blob/main/chatgpt/driver.py); [server/api.py](https://github.com/Amitk003/chatgpt-web-to-api-expose-reverse-engineering/blob/main/server/api.py) | So sánh tính bền UI với trực tiếp protocol; lock phiên để tránh trộn chat | MIT |
 | [lanqian528/chat2api](https://github.com/lanqian528/chat2api) | FastAPI router + upstream chat service + streaming | [api/chat2api.py](https://github.com/lanqian528/chat2api/blob/main/api/chat2api.py) StreamingResponse/scheduler; [chatgpt/ChatService.py](https://github.com/lanqian528/chat2api/blob/main/chatgpt/ChatService.py) | Định nghĩa ranh giới router, service, authentication, response mapping | MIT |
 
-**Không sao chép mã nguồn trực tiếp**, vì các dự án có điều kiện license khác nhau; nghiên cứu cách thiết kế ở mức kiến trúc. Việc một repo có thể truy cập giao thức web của một dịch vụ **không** có nghĩa các giao thức đó được nhà cung cấp cho phép khai thác.
+**Reuse theo license:** có thể tham khảo và tái sử dụng mã theo điều kiện giấy phép tương ứng (đặc biệt chú ý AGPL-3.0); ghi attribution, kiểm tra nghĩa vụ distribution/network use trước khi tích hợp. Các cơ chế private protocol là đối tượng phân tích trong phạm vi nghiên cứu được ủy quyền.
 
 ## 6 kỹ thuật rút ra
 
@@ -20,7 +20,7 @@
 
 - **Official HTTP/MCP:** service có hợp đồng chính thức, OAuth hoặc token, endpoint có tài liệu. Ưu tiên.
 - **Browser-driven:** tương tác qua UI và đọc kết quả hiển thị; DOM có thể thay đổi; đắt tài nguyên; chỉ trong môi trường được cho phép.
-- **Web protocol/RPC:** chuyển payload nội bộ và giải mã response; thường nhanh nhưng dễ gãy khi phiên bản web thay đổi, và có nguy cơ vượt quá quyền sử dụng.
+- **Web protocol/RPC:** phân tích schema, session identifiers, request replay, decode response và versioning trong phạm vi được ủy quyền; thường ít overhead nhưng dễ gãy khi web cập nhật. Không tự giả định payload hiện tại của ClickUp giống bất kỳ dự án mẫu nào.
 
 Không có bằng chứng từ các repo trên về cấu trúc wire protocol của ClickUp Brain².
 
@@ -48,7 +48,7 @@ Chỉ lưu ID opaque do provider **thật sự trả về**. Không khẳng đ�
 
 ### 5. Streaming & event decoder
 
-Chưa biết ClickUp dùng SSE, WebSocket, long polling hay JSON một lần. Cần xác định **trong phạm vi quyền được cấp**, không suy đoán protocol từ screenshot.
+Chưa biết ClickUp dùng SSE, WebSocket, streaming fetch, long polling hay JSON một lần. **Nhiệm vụ nghiên cứu tiếp theo** là đo bằng trace các lượt chat trên browser được ủy quyền, phân loại network protocol theo Content-Type, timing và framing.
 
 Nếu backend hợp lệ trả SSE: giữ `text/event-stream`, ngăn cách sự kiện bằng dòng trống, hỗ trợ nhiều dòng `data:`, stop tại sentinel kết thúc theo contract, hủy luồng khi client disconnect, xử lý dữ liệu UTF-8 phân mảnh. Tham khảo [MDN SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events) và `openwebui-chat2api` đoạn SSE passthrough.
 
@@ -66,8 +66,24 @@ Một adapter có thể expose `GET /healthz`, `GET /v1/models`, `POST /v1/chat/
 | Streaming | Theo tài liệu | Khó theo dõi đúng delta | Tùy protocol |
 | Auth | OAuth/API token hợp lệ | Session trình duyệt nhạy cảm | Token nội bộ nhạy cảm |
 | Nhiều model | Nếu nhà cung cấp hỗ trợ | Theo UI được phép | Chưa rõ |
-| Khuyến nghị | **MVP chính** | Không dùng với ClickUp khi chưa có phép | Không dùng với ClickUp khi chưa có phép |
+| Khuyến nghị | Một lựa chọn | Khảo sát trong scope được ủy quyền | Khảo sát trong scope được ủy quyền |
 
 ## Kết luận
 
-Bài học lớn nhất không phải một đoạn fetch/cookie cụ thể mà là **phân lớp độc lập**: transport → auth → session → model registry → event decoder → OpenAI-compatible facade. Với ClickUp, chọn hướng tích hợp chính thức trước; tiếp tục khảo sát hợp đồng tính năng, không khẳng định một Brain² chat endpoint đã tồn tại.
+Bài học lớn nhất không phải một đoạn fetch/cookie cụ thể mà là **phân lớp độc lập**: transport → auth → session → model registry → event decoder → OpenAI-compatible facade. Với ClickUp, nghiên cứu đồng thời UI/browser transport và official API để xác định đường truy cập phù hợp phạm vi ủy quyền. Bước tiếp theo là thu **bằng chứng redacted** cho request/response, model dispatch, conversation IDs và event framing; **chưa** khẳng định Brain² chat endpoint đã được tìm thấy.
+
+
+## Checklist bóc tách từ từng dự án (ứng dụng vào ClickUp)
+
+| Pattern | Thành phần source | Cần xác nhận trên ClickUp |
+|---|---|---|
+| Browser driver | `Amitk003/.../browser.py` | DOM selector cho composer, model selector, response completion; xử lý dynamic UI |
+| Direct request transport | `Amitk003/.../driver.py` | Endpoint và kiểu transport sau khi người dùng gửi một prompt hợp lệ; field schema |
+| Session refresh | `HanaokaYuzu/.../client.py` | Phiên hết hạn được browser xử lý thế nào, cookie/token lifecycle, permission failures |
+| Message/conversation metadata | `ntthanh2603/.../gemini_chat_session.go` | ID thread, turn, parent, response do server cấp; replay/multi-turn |
+| SSE framing | `Sozbo-Tang/.../chat2api.py` | Content-Type, CRLF/newline, done signal, interruption và parse JSON |
+| API facade | `ntthanh2603/.../openai_controller.go` | Mapping model và chunk/event tới JSON/SSE kiểu OpenAI |
+
+**Kỹ thuật nghiên cứu có thể triển khai:** Playwright `page.on("request")`, `page.on("response")`, `requestfinished`, `page.on("websocket")`; DevTools Network với `Preserve log`; diff các lượt chat thay đổi duy nhất một thuộc tính (model, prompt, conversation). Thu đầu tiên là metadata không bí mật; khi cần payload để dựng schema, lưu ở kho lưu trữ riêng đúng phạm vi ủy quyền, không đưa vào Git công khai.
+
+Chi tiết: [06 — Protocol research](06_AUTHORIZED_PROTOCOL_RESEARCH.md).
