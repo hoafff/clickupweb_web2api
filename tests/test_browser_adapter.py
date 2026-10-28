@@ -32,9 +32,12 @@ def frame(name: str, *, result: str = "r1", conv: str = "c1",
 
 
 class _FakeLocator:
-    def __init__(self, *, count: int = 1, visible: bool = True):
+    def __init__(self, *, count: int = 1, visible: bool = True,
+                 enabled: bool = True, on_fill=None):
         self._count = count
         self._visible = visible
+        self._enabled = enabled
+        self.on_fill = on_fill
         self.filled = None
         self.clicked = False
 
@@ -44,8 +47,19 @@ class _FakeLocator:
     async def is_visible(self):
         return self._visible
 
+    async def is_enabled(self):
+        return self._enabled
+
+    async def wait_for(self, *, state, timeout):
+        assert state == "visible"
+        if not self._visible or self._count == 0:
+            from playwright.async_api import Error as PlaywrightError
+            raise PlaywrightError("not visible")
+
     async def fill(self, value, *, timeout):
         self.filled = value
+        if self.on_fill is not None:
+            self.on_fill()
 
     async def click(self, *, timeout):
         self.clicked = True
@@ -140,13 +154,36 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         sender._visible = False
         with self.assertRaisesRegex(BrowserAdapterError, "not visible"):
             await _send_via_ui(page, "ping", "[data-test=composer]", "[data-test=send]")
-        self.assertIsNone(composer.filled)
+        self.assertEqual(composer.filled, "ping")
         self.assertFalse(sender.clicked)
 
         sender._visible = True
         await _send_via_ui(page, "ping", "[data-test=composer]", "[data-test=send]")
         self.assertEqual(composer.filled, "ping")
         self.assertTrue(sender.clicked)
+
+    async def test_send_button_can_appear_only_after_typing(self):
+        sender = _FakeLocator(count=0, visible=False)
+        composer = _FakeLocator(on_fill=lambda: (
+            setattr(sender, "_count", 1),
+            setattr(sender, "_visible", True),
+        ))
+        page = _FakePage(composer, sender)
+        await _send_via_ui(
+            page, "OK", "[data-test=composer]", "[data-test=send]"
+        )
+        self.assertEqual(composer.filled, "OK")
+        self.assertTrue(sender.clicked)
+
+    async def test_disabled_send_never_clicked(self):
+        sender = _FakeLocator(enabled=False)
+        composer = _FakeLocator()
+        page = _FakePage(composer, sender)
+        with self.assertRaisesRegex(BrowserAdapterError, "disabled"):
+            await _send_via_ui(
+                page, "OK", "[data-test=composer]", "[data-test=send]"
+            )
+        self.assertFalse(sender.clicked)
 
     async def test_missing_or_blank_prompt_refuses_send(self):
         sender = _FakeLocator()
