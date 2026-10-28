@@ -130,6 +130,14 @@ class ValidationSafetyTests(unittest.TestCase):
         ])
         self.assertEqual(big.status_code, 422)
         self.assertNotIn(PRIVATE, big.text)
+        self.assertIn("Compiled text transcript exceeds", big.text)
+        counters = self.diagnostics()
+        self.assertEqual(
+            counters["http_chat_rejected_compiled_transcript_too_long"], 1,
+        )
+        self.assertEqual(
+            counters["http_chat_rejected_message_too_long"], 0,
+        )
         self.assertEqual(self.engine.calls, [])
 
     def test_plain_chat_still_returns_reply_and_no_422(self):
