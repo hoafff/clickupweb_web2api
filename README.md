@@ -1,6 +1,6 @@
 # ClickUp Brain² — Web → API Research
 
-> **Trạng thái (28/10/2026):** **Live auto-send E2E PASS** trên phiên ClickUp Brain² được phép: Playwright tự nhập/click Send, nhận `OK` qua WebSocket. Đã triển khai **localhost FastAPI JSON facade (mock/CI PASS, chưa chạy live HTTP E2E)**. Chưa có gateway cloud, streaming token hoặc direct inference API được xác minh. Dữ liệu browser profile và credential chỉ ở máy người nghiên cứu.
+> **Trạng thái (28/10/2026):** **Live auto-send E2E PASS** trên phiên ClickUp Brain² được phép: Playwright tự nhập/click Send, nhận `OK` qua WebSocket. Đã xác minh **localhost FastAPI JSON facade: live HTTP → browser → WebSocket → response `OK` PASS**, dùng request JSON UTF-8 trên Windows PowerShell. Chưa có gateway cloud, streaming token hoặc direct inference API được xác minh. Dữ liệu browser profile và credential chỉ ở máy người nghiên cứu.
 
 ## Mục tiêu
 
@@ -73,7 +73,7 @@ Trình duyệt mở ở chế độ nhìn thấy được. Đăng nhập bằng 
 - [x] Xác minh editor + Send selector từ DOM thực tế sau khi nhập bản nháp (11 → 12 nearby buttons).
 - [x] Auto-send Playwright trên ClickUp live PASS: 1/1 `OK`, 15 WebSocket JSON frames, không click tay.
 - [x] Tạo FastAPI JSON facade localhost, auth Bearer, đơn request, mock tests trên Windows/Linux.
-- [ ] Live HTTP→Playwright→ClickUp→WS→JSON response E2E.
+- [x] Live HTTP→Playwright→ClickUp→WS→JSON response E2E: request UTF-8 trên Windows PowerShell trả về `OK`.
 - [ ] Streaming/SSE, model switch tự động, quota/usage, multi-session và cloud hosting.
 
 ## Nguồn
@@ -244,9 +244,9 @@ git pull
 
 ## Local HTTP JSON gateway POC — ready for live acceptance test
 
-**Đã xác nhận trong phiên ClickUp thực:** `browser_adapter.py --mode auto` tự điền prompt `Trả lời đúng một từ: OK`, click Send rồi nhận `OK` (15 WS JSON frames, matched 1/1). Code local FastAPI mới [`tools/local_gateway.py`](tools/local_gateway.py) + [hướng dẫn cài/kiểm thử](docs/15_LOCAL_HTTP_GATEWAY.md) dùng UI adapter này để cung cấp `POST /v1/chat/completions`. **Chưa kiểm thử HTTP gateway với session thật; chỉ mock/CI PASS.**
+**Đã xác nhận trong phiên ClickUp thực:** `browser_adapter.py --mode auto` tự điền prompt `Trả lời đúng một từ: OK`, click Send rồi nhận `OK` (15 WS JSON frames, matched 1/1). Code local FastAPI mới [`tools/local_gateway.py`](tools/local_gateway.py) + [hướng dẫn cài/kiểm thử](docs/15_LOCAL_HTTP_GATEWAY.md) dùng UI adapter này để cung cấp `POST /v1/chat/completions`. **ĐÃ kiểm thử HTTP gateway live với phiên ClickUp thật: trả lời `OK` sau khi gửi JSON UTF-8.**
 
-Không hỗ trợ stream, system prompt, history JSON, đổi model qua API hay token usage. `model="clickup-ui-current"` nghĩa là model/effort đang chọn **trong browser**, không phải model ID riêng của ClickUp. Chỉ một request tại một thời điểm, key Bearer độc lập, listen `127.0.0.1`. Đây là **local thử nghiệm**, chưa thể chạy 24/7 trên cloud và chưa có session isolation.
+Không hỗ trợ stream, system prompt, history JSON, đổi model qua API hay token usage. `model="clickup-ui-current"` nghĩa là model/effort đang chọn **trong browser**, không phải model ID riêng của ClickUp. Chỉ một request tại một thời điểm, key Bearer độc lập, listen `127.0.0.1`. Đây là **local thử nghiệm đã PASS một lượt live**, chưa thể chạy 24/7 trên cloud và chưa có session isolation.
 
 ```powershell
 cd E:\Toolss\clickuptoapi
@@ -278,7 +278,7 @@ $utf8Body = [System.Text.Encoding]::UTF8.GetBytes($body)
 Invoke-RestMethod -Uri "http://127.0.0.1:8787/v1/chat/completions" -Method Post -Headers $headers -ContentType "application/json; charset=utf-8" -Body $utf8Body
 ```
 
-`.local/gateway.key` là plaintext **nhạy cảm**, đã được `.gitignore` loại trừ; không chia sẻ/upload nó. Gửi lại output HTTP JSON đã xem xét để xác nhận milestone live HTTP.
+`.local/gateway.key` là plaintext **nhạy cảm**, đã được `.gitignore` loại trừ; không chia sẻ/upload nó. Kết quả người nghiên cứu đã xác nhận: `$response.choices[0].message.content` trả về `OK`. Chưa kiểm thử multi-turn, headless hoặc server cloud.
 
 
 ### Windows PowerShell HTTP 400: JSON body parse error
@@ -294,3 +294,16 @@ Sau `git pull`, có thể dùng luôn helper cho PowerShell 5.1/7:
 ```
 
 Script đọc key từ `.local/gateway.key`, không in key/prompt, truyền JSON UTF-8 dạng **byte array**; chỉ in nội dung câu trả lời. Nếu execution policy không cho chạy `.ps1`, dùng lệnh `$utf8Body` trực tiếp; không cần thay đổi policy toàn máy. Xem [troubleshooting đầy đủ](docs/15_LOCAL_HTTP_GATEWAY.md).
+
+
+## Live Gateway E2E — VERIFIED (28/10/2026)
+
+Người nghiên cứu đã giữ Chromium và FastAPI ở `http://127.0.0.1:8787`, gửi `POST /v1/chat/completions` với `model=clickup-ui-current`, một message `role=user` chứa tiếng Việt, `stream=false`, xác thực Bearer. Lần đầu: request lỗi JSON body parsing trên Windows PowerShell. Sau khi đổi sang:
+
+```powershell
+$utf8Body = [System.Text.Encoding]::UTF8.GetBytes($body)
+$response = Invoke-RestMethod -Uri "http://127.0.0.1:8787/v1/chat/completions" -Method Post -Headers $headers -ContentType "application/json; charset=utf-8" -Body $utf8Body
+$response.choices[0].message.content
+```
+
+Terminal trả về chính xác `OK`. Điều này xác minh **một lượt local HTTP → Playwright UI send → WS reply-created → HTTP JSON response**, không chứng minh độ bền 24/7, khôi phục phiên, streaming, multi-turn hay model switching qua HTTP. Xem [biên bản nghiệm thu và deployment gates](docs/16_LIVE_HTTP_ACCEPTANCE_AND_DEPLOYMENT_GATES.md).
