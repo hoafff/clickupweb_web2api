@@ -191,7 +191,7 @@ class RouterPathTests(unittest.TestCase):
         self.assertEqual(len(self.server.requests), 1)
 
     def test_invalid_suffix_does_not_send_request(self):
-        for marker in ("", "bad\\nmarker", "x" * 101):
+        for marker in ("", "bad" + chr(10) + "marker", "x" * 101):
             with self.subTest(marker=marker[:15]):
                 rejected = self.run_cli("--expect-suffix", marker)
                 self.assertNotEqual(rejected.returncode, 0)
