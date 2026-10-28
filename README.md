@@ -1,6 +1,6 @@
 # ClickUp Brain² — Web → API Research
 
-> **Trạng thái (28/10/2026):** Đã khảo sát 5 dự án Web → API; chuyển sang **protocol research / implementation-oriented**. Người thực hiện cho biết **đã được ủy quyền nghiên cứu**. Phạm vi kỹ thuật dự kiến: trace hoạt động của Web UI, đối chiếu request/response, giải mã streaming và tạo API facade. **Chưa có endpoint ClickUp Brain² nào được thực nghiệm hoặc xác minh**. Đây chưa phải một proxy Brain² hoàn chỉnh.
+> **Trạng thái (28/10/2026):** **Live auto-send E2E PASS** trên phiên ClickUp Brain² được phép: Playwright tự nhập/click Send, nhận `OK` qua WebSocket. Đã triển khai **localhost FastAPI JSON facade (mock/CI PASS, chưa chạy live HTTP E2E)**. Chưa có gateway cloud, streaming token hoặc direct inference API được xác minh. Dữ liệu browser profile và credential chỉ ở máy người nghiên cứu.
 
 ## Mục tiêu
 
@@ -66,13 +66,15 @@ Trình duyệt mở ở chế độ nhìn thấy được. Đăng nhập bằng 
 - [x] Thiết kế protocol observation và tracer metadata.
 - [x] Chạy tracer với phiên ClickUp được cấp quyền, thu bằng chứng đã redacted (V3).
 - [x] Xác minh HTTP chat command, selectedModel/selectedReasoningLevel và WS reply-created event trên V3; **chưa xác minh full inference/streaming transport**.
-- [x] Xây và kiểm thử offline conversation correlator; **chưa có browser/protocol adapter gửi prompt**.
+- [x] Xây và kiểm thử offline conversation correlator; replay V3 thực tế đạt 8/8.
 - [x] Triển khai Browser Adapter prototype (manual + opt-in CSS send), kiểm thử offline bằng fake WS/UI.
 - [x] Kiểm thử live Browser Adapter (manual UI send → WS reply) với phiên được ủy quyền: nhận 1/1 reply "OK".
-- [x] Bổ sung read-only DOM inspector để khám phá CSS selector; mới kiểm thử fixture/CI.
+- [x] Bổ sung read-only DOM inspector; đã xác minh nút Send trong DOM thực tế.
 - [x] Xác minh editor + Send selector từ DOM thực tế sau khi nhập bản nháp (11 → 12 nearby buttons).
-- [ ] Auto-send Playwright trên ClickUp live: chờ người nghiên cứu chạy một lượt với selector đã xác minh.
-- [ ] Demo OpenAI-compatible JSON/SSE, kiểm thử multi-model, quota và tính ổn định.
+- [x] Auto-send Playwright trên ClickUp live PASS: 1/1 `OK`, 15 WebSocket JSON frames, không click tay.
+- [x] Tạo FastAPI JSON facade localhost, auth Bearer, đơn request, mock tests trên Windows/Linux.
+- [ ] Live HTTP→Playwright→ClickUp→WS→JSON response E2E.
+- [ ] Streaming/SSE, model switch tự động, quota/usage, multi-session và cloud hosting.
 
 ## Nguồn
 
@@ -195,7 +197,7 @@ git pull
 
 Khi Chromium mở: đăng nhập/mở Brain², chọn model, bảo đảm không còn câu trả lời đang chạy. Quay lại PowerShell nhấn ENTER để **arm**. Sau đó gửi **đúng một** tin trong Browser. Adapter lắng nghe `/ws`, ghép `aiConversationStarted` → `chatCommentCreated`, in độ dài văn bản, không in prompt hoặc trả lời. Thêm `--show-reply` nếu muốn hiển thị nội dung trả lời riêng trên console.
 
-`--mode auto --confirm-send --composer-selector ... --send-selector ...` cũng đã có nhưng **chưa kiểm thử DOM thật**; chỉ sử dụng khi tự xác minh CSS selector trên Browser. Không suy diễn selector từ ảnh hoặc trace network. CI chỉ kiểm thử offline mock trên Ubuntu/Windows; **live E2E, API gateway và server-side model execution chưa được xác minh**.
+`--mode auto --confirm-send --composer-selector ... --send-selector ...` cũng đã có nhưng **chưa kiểm thử DOM thật**; chỉ sử dụng khi tự xác minh CSS selector trên Browser. Không suy diễn selector từ ảnh hoặc trace network. CI chỉ kiểm thử offline mock trên Ubuntu/Windows; **live manual/auto-send đã được kiểm chứng; HTTP gateway live, streaming và server-side model execution chưa xác minh**.
 
 
 ## Live Browser Adapter đã PASS — chuẩn bị auto-send
@@ -229,7 +231,7 @@ Nhấn Enter trong **PowerShell** lần 1 khi editor trống. Gõ `OK` trong edi
 
 ### Verified Send button — one-message auto E2E test
 
-Đã quan sát **Send hiện lên sau khi nhập text**, với `data-test=refinement-prompt-submit-button`, `aria-label=Send`, `type=submit`; editor `div[contenteditable=true]`. Auto mode đã thêm fail-closed checks cho đúng các thuộc tính này và không click trước khi nút xuất hiện. Đây là **code đã kiểm thử mock**, không phải live auto E2E đã PASS.
+Đã quan sát **Send hiện lên sau khi nhập text**, với `data-test=refinement-prompt-submit-button`, `aria-label=Send`, `type=submit`; editor `div[contenteditable=true]`. Auto mode đã thêm fail-closed checks cho đúng các thuộc tính này và không click trước khi nút xuất hiện. Sau đó người nghiên cứu đã chạy auto E2E live thành công (1/1 reply `OK`).
 
 ```powershell
 cd E:\Toolss\clickuptoapi
@@ -238,3 +240,40 @@ git pull
 ```
 
 Đóng Chromium cũ, mở Brain Ask trong Chromium mới, để trống editor. Nhấn Enter trong PowerShell ở bước arm, sau đó nhập `Trả lời đúng một từ: OK` khi chương trình hỏi prompt rồi nhấn Enter. **Không tự click Send bằng tay**; script sẽ fill và submit 1 lần. Nếu DOM thay đổi, tool dừng với thông báo lỗi. Xem [kết quả DOM và hướng dẫn](docs/14_UI_SELECTOR_INSPECTION.md).
+
+
+## Local HTTP JSON gateway POC — ready for live acceptance test
+
+**Đã xác nhận trong phiên ClickUp thực:** `browser_adapter.py --mode auto` tự điền prompt `Trả lời đúng một từ: OK`, click Send rồi nhận `OK` (15 WS JSON frames, matched 1/1). Code local FastAPI mới [`tools/local_gateway.py`](tools/local_gateway.py) + [hướng dẫn cài/kiểm thử](docs/15_LOCAL_HTTP_GATEWAY.md) dùng UI adapter này để cung cấp `POST /v1/chat/completions`. **Chưa kiểm thử HTTP gateway với session thật; chỉ mock/CI PASS.**
+
+Không hỗ trợ stream, system prompt, history JSON, đổi model qua API hay token usage. `model="clickup-ui-current"` nghĩa là model/effort đang chọn **trong browser**, không phải model ID riêng của ClickUp. Chỉ một request tại một thời điểm, key Bearer độc lập, listen `127.0.0.1`. Đây là **local thử nghiệm**, chưa thể chạy 24/7 trên cloud và chưa có session isolation.
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe -m pip install -r requirements-gateway.txt
+
+New-Item -ItemType Directory -Force .local | Out-Null
+if (-not (Test-Path .local\gateway.key)) {
+  .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))" |
+    Set-Content -Encoding Ascii .local\gateway.key
+}
+$env:CLICKUP_GATEWAY_API_KEY = (Get-Content -Raw .local\gateway.key).Trim()
+.\.venv\Scripts\python.exe tools\local_gateway.py --port 8787
+```
+
+Đóng Chromium tracer/inspector/adapter cũ trước. Khi browser mới mở, vào ClickUp Brain Ask, chọn model/effort, xong nhấn ENTER ở PowerShell để server listen. Trong **PowerShell thứ hai**:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+$env:CLICKUP_GATEWAY_API_KEY = (Get-Content -Raw .local\gateway.key).Trim()
+$headers = @{ Authorization = "Bearer $env:CLICKUP_GATEWAY_API_KEY" }
+$body = @{
+  model = "clickup-ui-current"
+  messages = @(@{ role = "user"; content = "Trả lời đúng một từ: OK" })
+  stream = $false
+} | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri "http://127.0.0.1:8787/v1/chat/completions" -Method Post -Headers $headers -ContentType "application/json" -Body $body
+```
+
+`.local/gateway.key` là plaintext **nhạy cảm**, đã được `.gitignore` loại trừ; không chia sẻ/upload nó. Gửi lại output HTTP JSON đã xem xét để xác nhận milestone live HTTP.
