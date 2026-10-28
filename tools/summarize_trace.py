@@ -38,14 +38,24 @@ def aggregate(events: list[dict[str, Any]]) -> dict[str, Any]:
     request_by_id: dict[str, dict[str, Any]] = {}
     ws_by_id: dict[str, dict[str, Any]] = {}
     kinds: Counter[str] = Counter()
+    current_phase = "unmarked"
+    markers: list[dict[str, str]] = []
 
     for event in events:
         kind = event.get("kind", "unknown")
         kinds[kind] += 1
+        if kind == "manual_marker":
+            current_phase = str(event.get("label", "unmarked"))
+            markers.append({
+                "label": current_phase,
+                "timestamp_utc": str(event.get("timestamp_utc", "")),
+            })
+            continue
 
         if kind == "http_request":
             request_by_id[str(event.get("request_id"))] = {
                 "method": event.get("method", ""),
+                "phase": current_phase,
                 "url": event.get("url", ""),
                 "resource_type": event.get("resource_type", ""),
                 "json_key_paths": event.get("json_key_paths", []),
@@ -122,6 +132,13 @@ def aggregate(events: list[dict[str, Any]]) -> dict[str, Any]:
         if not req["completed"]:
             item["unfinished"] += 1
 
+    phases: dict[str, Counter[str]] = defaultdict(Counter)
+    for req in request_by_id.values():
+        url = req["url"]
+        if "app-cdn.clickup.com" in url or "io.web.clickup.com" in url:
+            continue
+        phases[req["phase"]][f"{req['method']} {url}"] += 1
+
     http_summary = []
     for (method, url), obj in endpoints.items():
         durations = obj["latency_ms"]
@@ -151,6 +168,12 @@ def aggregate(events: list[dict[str, Any]]) -> dict[str, Any]:
         "total_events": len(events),
         "event_types": dict(kinds),
         "http_request_count": len(request_by_id),
+        "manual_markers": markers,
+        "phase_candidates": {
+            label: [{"request": path, "count": count}
+                    for path, count in counter.most_common(20)]
+            for label, counter in phases.items()
+        },
         "http_endpoints": http_summary,
         "websockets": ws_summary,
     }
@@ -174,6 +197,15 @@ def main() -> int:
 
     print(f"Events: {result['total_events']} | HTTP requests: {result['http_request_count']}")
     print(f"Event types: {result['event_types']}")
+    if result["manual_markers"]:
+        print("\nManual markers:")
+        for item in result["manual_markers"]:
+            print(f"  {item['timestamp_utc']}  {item['label']}")
+        print("\nHTTP candidates by phase (excluding CDN/telemetry):")
+        for phase, entries in result["phase_candidates"].items():
+            print(f"  [{phase}]")
+            for item in entries[:10]:
+                print(f"    {item['count']:3d}x {item['request']}")
     print("\nHTTP candidates (grouped method + redacted URL):")
     for item in result["http_endpoints"][: max(0, args.top)]:
         print(f"  {item['method']:7s} {item['count']:4d}x {item['url']}")
