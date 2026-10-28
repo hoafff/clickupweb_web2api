@@ -273,7 +273,24 @@ $body = @{
   messages = @(@{ role = "user"; content = "Trả lời đúng một từ: OK" })
   stream = $false
 } | ConvertTo-Json -Depth 5
-Invoke-RestMethod -Uri "http://127.0.0.1:8787/v1/chat/completions" -Method Post -Headers $headers -ContentType "application/json" -Body $body
+# Windows PowerShell 5.1: transmit UTF-8 bytes, not a string body.
+$utf8Body = [System.Text.Encoding]::UTF8.GetBytes($body)
+Invoke-RestMethod -Uri "http://127.0.0.1:8787/v1/chat/completions" -Method Post -Headers $headers -ContentType "application/json; charset=utf-8" -Body $utf8Body
 ```
 
 `.local/gateway.key` là plaintext **nhạy cảm**, đã được `.gitignore` loại trừ; không chia sẻ/upload nó. Gửi lại output HTTP JSON đã xem xét để xác nhận milestone live HTTP.
+
+
+### Windows PowerShell HTTP 400: JSON body parse error
+
+Nếu server đã báo `LOCAL API ready` nhưng `Invoke-RestMethod` trả `{"detail":"There was an error parsing the body"}` với prompt tiếng Việt, khả năng cao payload JSON được gửi với encoding không phải UTF-8 (cụ thể bytes của request lỗi **chưa được thu**). **Không cần khởi động lại gateway**: tạo `$utf8Body = [Text.Encoding]::UTF8.GetBytes($body)` và gửi bằng `-Body $utf8Body -ContentType 'application/json; charset=utf-8'` như ví dụ trên.
+
+Sau `git pull`, có thể dùng luôn helper cho PowerShell 5.1/7:
+
+```powershell
+.\tools\send_gateway_request.ps1
+# Hoặc truyền prompt Unicode trong terminal:
+.\tools\send_gateway_request.ps1 -Prompt 'Trả lời đúng một từ: OK'
+```
+
+Script đọc key từ `.local/gateway.key`, không in key/prompt, truyền JSON UTF-8 dạng **byte array**; chỉ in nội dung câu trả lời. Nếu execution policy không cho chạy `.ps1`, dùng lệnh `$utf8Body` trực tiếp; không cần thay đổi policy toàn máy. Xem [troubleshooting đầy đủ](docs/15_LOCAL_HTTP_GATEWAY.md).
