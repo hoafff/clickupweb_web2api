@@ -455,7 +455,7 @@ git pull
 .\.venv\Scripts\python.exe tools\check_9router_path.py --stream
 ```
 
-`--save-key` sử dụng `getpass` và lưu riêng `.local/ninerouter.key` (Git-ignored), **không** lấy `.local/gateway.key` thay thế. Nếu 9Router local cho phép không cần key thì bỏ qua `--save-key`. Kết quả kỳ vọng `brain/clickup-ui-current` xuất hiện trong `/v1/models` của 9Router và test in `9Router -> Brain Gateway -> ClickUp: PASS`. **Lượt kiểm thử 9Router thực tế chưa được xác nhận.** Các client coding agent cần tool calling/real-time streaming còn chưa được hỗ trợ.
+`--save-key` sử dụng `getpass` và lưu riêng `.local/ninerouter.key` (Git-ignored), **không** lấy `.local/gateway.key` thay thế. Nếu 9Router local cho phép không cần key thì bỏ qua `--save-key`. Kết quả kỳ vọng `brain/clickup-ui-current` xuất hiện trong `/v1/models` của 9Router và test in `9Router -> Brain Gateway -> ClickUp: PASS`. **Cập nhật:** lượt kiểm thử JSON qua 9Router **đã PASS live**; SSE/history xuyên 9Router và reply dài chưa xác minh. Các client coding agent cần tool calling/real-time streaming còn chưa được hỗ trợ.
 
 **Bảo mật:** 9Router từng có các lỗi bypass xác thực trên phiên bản cũ (ví dụ CVE-2026-55641 và CVE-2026-56681, đã có bản vá). Chỉ bind 9Router và Gateway vào loopback, xác minh phiên bản hiện hành và tránh tunnel/public exposure. 9Router trong Docker/cloud không thể dùng `127.0.0.1:8787` để đến Gateway trên máy Windows. Xem [doc 18](docs/18_9ROUTER_BASIC_COMPAT.md) và [GitHub Advisory](https://github.com/advisories/GHSA-86m2-fcxq-5q7c).
 
@@ -476,7 +476,7 @@ git pull
 
 If it reports `invalid_api_key`, check the **9Router API key issued from its Endpoints/API Keys page**, which is **different** from the upstream Gateway key saved in 9Router's custom provider connection. You can recreate the local `.local/ninerouter.key` (and only that file) using `Remove-Item .local\ninerouter.key` followed by `check_9router_path.py --save-key`.
 
-**More conclusive:** To use the new Gateway counters, stop/restart PowerShell 1's Gateway **after** `git pull`; run `send_gateway_request.py --diagnostics` before/after exactly one 9Router JSON request. If `http_chat_received` stays 0, 9Router rejected before forwarding; if it increments with `http_chat_401`, the **upstream connection key** in 9Router is wrong. Full commands, warnings and decision tree: [docs/19_9ROUTER_401_DIAGNOSTICS.md](docs/19_9ROUTER_401_DIAGNOSTICS.md). Current 9Router→Brain **chat** remains unverified, not PASS.
+**More conclusive:** To use the new Gateway counters, stop/restart PowerShell 1's Gateway **after** `git pull`; run `send_gateway_request.py --diagnostics` before/after exactly one 9Router JSON request. If `http_chat_received` stays 0, 9Router rejected before forwarding; if it increments with `http_chat_401`, the **upstream connection key** in 9Router is wrong. Full commands, warnings and decision tree: [docs/19_9ROUTER_401_DIAGNOSTICS.md](docs/19_9ROUTER_401_DIAGNOSTICS.md). **Updated 2026-10-28:** 9Router→Brain JSON Chat Completions **LIVE PASS** after creating a separate 9Router client key. Older 401 text retained here for troubleshooting only.
 
 
 ### Khắc phục xác thực 9Router 401 khi dùng trùng key ở hai tầng
@@ -494,3 +494,22 @@ Remove-Item .local\ninerouter.key
 ```
 
 Tool sẽ dừng **trước khi gửi request** nếu hai file key vẫn trùng nhau và không in giá trị key. 9Router client key do dashboard cấp vẫn cần đúng tiến trình đang nghe tại `127.0.0.1:20128`. Xem [diagnostics chi tiết](docs/19_9ROUTER_401_DIAGNOSTICS.md).
+
+
+## Live 9Router JSON E2E — VERIFIED, next compatibility tests
+
+**User-confirmed 2026-10-28:** after installing a separately issued 9Router client key, the actual `tools/check_9router_path.py` request through `127.0.0.1:20128` returned `9Router -> Brain Gateway -> ClickUp: PASS` and `Reply preview: OK` (3 characters). This proves the **basic JSON path** `9Router → Brain Gateway → signed-in Playwright → ClickUp Brain² → HTTP JSON` for a short prompt.
+
+**Still unverified through 9Router:** `stream=true`, multi-message transcript, long-answer completeness, native tool calling, robust session recovery or cloud operation. These should not be described as production-ready or Codex/Claude Code replacements. Gateway port 8787 has independently passed buffered SSE/history/isolated-chat tests.
+
+The 9Router smoke client now supports additional **opt-in** test flags, tested against mock HTTP in Windows/Linux CI. On PowerShell 2, **keep both 9Router and the `--router-mode` Gateway running**, then:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\check_9router_path.py --stream
+.\.venv\Scripts\python.exe tools\check_9router_path.py --history
+.\.venv\Scripts\python.exe tools\check_9router_path.py --prompt "Write five numbered sentences about HTTP and WebSocket, at least 15 words each." --min-reply-chars 200
+```
+
+Each request sends real ClickUp traffic; `--min-reply-chars` is a heuristic, **not** proof of true answer completion. More evidence, boundaries and next work: [docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md](docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md). Keep `.local/ninerouter.key` (9Router caller) and `.local/gateway.key` (Gateway upstream) distinct and private.
