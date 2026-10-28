@@ -25,12 +25,12 @@ PROFILE = ROOT / ".local" / "browser-profile"
 # Read-only JavaScript. The UI's text content and input values are not read.
 PROBE_JS = r"""
 () => {
-  const opts = { maxEntries: 25, attrLimit: 100 };
+  const opts = { maxEntries: 80, attrLimit: 100, nearEditorRadius: 175 };
   const editorNodes = [...document.querySelectorAll(
     'textarea, [contenteditable="true"], [role="textbox"], input:not([type="hidden"]):not([type="password"])'
   )];
   const buttonNodes = [...document.querySelectorAll(
-    'button, [role="button"], input[type="submit"]'
+    'button, [role="button"], input[type="submit"], [data-test*="send"], [aria-label*="Send"]'
   )];
   const visible = (node) => {
     const rect = node.getBoundingClientRect();
@@ -106,9 +106,11 @@ PROBE_JS = r"""
   const editors = editorNodes.filter(visible).slice(0, opts.maxEntries);
   const editorsInfo = editors.map(node => ({
     kind: 'editor', tag: node.tagName.toLowerCase(),
-    attrs: attrs(node), rect: coords(node), ...selectorFor(node)
+    attrs: attrs(node), rect: coords(node),
+    disabled: node.hasAttribute('disabled') || node.getAttribute('aria-disabled') === 'true',
+    ...selectorFor(node)
   }));
-  // Only inspect buttons within 320px of an editor center, or in the
+  // Only inspect buttons within 175px of the editor rectangle, or in the
   // bottom 35% of the viewport if no visible editor was found.
   const relevantButton = (node) => {
     const r = node.getBoundingClientRect();
@@ -118,7 +120,7 @@ PROBE_JS = r"""
       const e = ed.getBoundingClientRect();
       const x = Math.max(e.left, Math.min(cx, e.right));
       const y = Math.max(e.top, Math.min(cy, e.bottom));
-      return Math.hypot(cx - x, cy - y) <= 320;
+      return Math.hypot(cx - x, cy - y) <= opts.nearEditorRadius;
     });
   };
   const buttons = buttonNodes.filter(n => visible(n) && relevantButton(n))
@@ -129,12 +131,45 @@ PROBE_JS = r"""
     visible_editors: editorsInfo,
     nearby_buttons: buttons.map(node => ({
       kind: 'button', tag: node.tagName.toLowerCase(),
-      attrs: attrs(node), rect: coords(node), ...selectorFor(node)
+      attrs: attrs(node), rect: coords(node),
+      disabled: node.hasAttribute('disabled') || node.getAttribute('aria-disabled') === 'true',
+      ...selectorFor(node)
     })),
     note: 'Never assume a button is Send based on order/coordinates alone. Verify in live DOM.'
   };
 }
 """
+
+
+def candidate_changes(before: dict, after: dict) -> dict:
+    """Only emit newly visible controls or controls whose disabled state changed.
+
+    Never inspect or return textbox contents. Coordinates and CSS selectors
+    are DOM metadata already recorded in individual snapshots.
+    """
+    old = {
+        item.get("css"): item
+        for item in before.get("nearby_buttons", [])
+        if item.get("css")
+    }
+    new_controls = []
+    enabled_controls = []
+    for item in after.get("nearby_buttons", []):
+        selector = item.get("css")
+        if not selector:
+            continue
+        previous = old.get(selector)
+        if previous is None:
+            new_controls.append(item)
+        elif previous.get("disabled") and not item.get("disabled"):
+            enabled_controls.append(item)
+    return {
+        "newly_visible_buttons": new_controls,
+        "newly_enabled_buttons": enabled_controls,
+        "nearby_count_before": len(before.get("nearby_buttons", [])),
+        "nearby_count_after": len(after.get("nearby_buttons", [])),
+        "hint": "Confirm the Send icon visually; no selector is automatically trusted.",
+    }
 
 
 def valid_clickup_url(url: str) -> bool:
@@ -175,12 +210,39 @@ async def run(args: argparse.Namespace) -> int:
                 await page.goto(args.url, wait_until="domcontentloaded", timeout=45_000)
             except PlaywrightError:
                 print("Initial navigation incomplete; continue manually.")
-            print("Open Brain² chat and ensure composer + send button are visible.")
+            print("Open Brain² chat; leave the composer EMPTY for the first inspection.")
             print("No message will be sent and no message contents will be read.")
             await asyncio.to_thread(input, "Press ENTER to inspect visible controls: ")
             selected = select_brain_page(context.pages)
-            result = await selected.evaluate(PROBE_JS)
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            first = await selected.evaluate(PROBE_JS)
+            if not args.after_draft:
+                print(json.dumps(first, ensure_ascii=False, indent=2))
+                return 0
+
+            print("First pass: empty composer; showing nearby control count only.")
+            print(f"Editors: {len(first['visible_editors'])}; "
+                  f"nearby buttons: {len(first['nearby_buttons'])}")
+            print("In the browser, TYPE a harmless draft into the Brain composer.")
+            print("Do NOT press Enter or click Send in the browser.")
+            await asyncio.to_thread(
+                input, "After the draft is visible (still UNSENT), press ENTER in PowerShell: "
+            )
+            second_page = select_brain_page(context.pages)
+            if second_page is not selected:
+                raise ValueError("The inspected Brain tab changed; aborting comparison.")
+            second = await selected.evaluate(PROBE_JS)
+            report = {
+                "mode": "after_unsent_draft",
+                "document_host": second.get("document_host"),
+                "visible_editors": second.get("visible_editors", []),
+                "nearby_buttons_after_draft": second.get("nearby_buttons", []),
+                "difference": candidate_changes(first, second),
+                "warning": (
+                    "No message was submitted by this tool. Manually clear your "
+                    "unsent draft if not needed; verify Send visually."
+                ),
+            }
+            print(json.dumps(report, ensure_ascii=False, indent=2))
             return 0
         finally:
             await context.close()
@@ -190,6 +252,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="https://app.clickup.com/")
     parser.add_argument("--profile-dir", type=Path, default=PROFILE)
+    parser.add_argument(
+        "--after-draft",
+        action="store_true",
+        help="Two-pass read-only inspection before/after researcher types UNSENT draft",
+    )
     args = parser.parse_args()
     try:
         return asyncio.run(run(args))
