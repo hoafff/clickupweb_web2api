@@ -42,7 +42,8 @@ Vẫn giữ kỹ thuật bảo vệ: không commit secret/cookie/HAR nguyên b�
 4. [04 — Observation worksheet](docs/04_OBSERVATION_WORKSHEET.md): bảng ghi kết quả thực nghiệm.
 5. [05 — Multi-model](docs/05_MULTI_MODEL_SUPPORT.md): dynamic discovery, menu model, switching.
 6. [06 — Authorized protocol research](docs/06_AUTHORIZED_PROTOCOL_RESEARCH.md): phương pháp quan sát request/response theo từng lượt chat.
-7. [Browser network tracer](tools/trace_browser.py): ví dụ tracer theo dõi metadata đã ẩn thông tin nhạy cảm; chạy trên browser profile riêng.
+7. [Web public findings](docs/07_PUBLIC_WEB_FINDINGS.md): phân biệt ClickUp Chat API, MCP, Brain² và giới hạn truy cập frontend.
+8. [Browser network tracer](tools/trace_browser.py): ví dụ tracer theo dõi metadata đã ẩn thông tin nhạy cảm; chạy trên browser profile riêng.
 
 ## Quick start — quan sát phiên Browser
 
