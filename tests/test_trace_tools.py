@@ -41,6 +41,23 @@ class TestRedaction(unittest.TestCase):
         )
         self.assertEqual(url, "https://app.clickup.com/api/{id}/{token}")
 
+    def test_mixed_short_object_identifier_is_masked(self):
+        self.assertEqual(
+            trace.sanitize_url(
+                "https://app.clickup.com/comments/view/z8rzdfj8qw-98?token=secret"
+            ),
+            "https://app.clickup.com/comments/view/{token}",
+        )
+
+    def test_websocket_schema_extracts_only_key_paths(self):
+        payload = '{"event":"chat_update","data":{"model":"private-value","text":"secret prompt"}}'
+        keys = trace.ws_json_key_paths(payload)
+        self.assertIn("data.model", keys)
+        self.assertIn("data.text", keys)
+        self.assertNotIn("secret prompt", str(keys))
+        self.assertEqual(trace.ws_json_key_paths("not json"), [])
+        self.assertEqual(trace.ws_json_key_paths(b"binary"), [])
+
     def test_host_scope_exact_and_subdomain(self):
         self.assertTrue(trace.host_in_scope("https://app.clickup.com/ai", ("clickup.com",)))
         self.assertTrue(trace.host_in_scope("wss://socket.clickup.com/ai", ("clickup.com",)))
