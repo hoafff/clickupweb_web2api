@@ -32,6 +32,12 @@ SECRETS_IN_TEXT = re.compile(
     r"authorization)\s*[:=]\s*)([^\s&,;\"']{6,})"
 )
 URL_KEY = re.compile(r"^(?:url|uri|href|link|redirect_uri|asset_url|image_url)$", re.IGNORECASE)
+CAMEL_SECRET_KEY = re.compile(
+    r"^(?:accessToken|refreshToken|idToken|authToken|sessionToken|sessionKey|"
+    r"csrfToken|xsrfToken|apiKey|clientSecret|privateKey|authHeader|"
+    r"requestHeaders|jwtToken)$",
+    re.IGNORECASE,
+)
 
 
 def safe_url(value: str) -> str:
@@ -74,7 +80,7 @@ def redact_payload(value: Any, *, depth: int = 0) -> Any:
         output: dict[str, Any] = {}
         for key, item in list(value.items())[:2_000]:
             name = str(key)
-            if TOKEN_KEY.search(name):
+            if TOKEN_KEY.search(name) or CAMEL_SECRET_KEY.fullmatch(name):
                 output[name] = REDACTED
             elif URL_KEY.fullmatch(name) and isinstance(item, str):
                 output[name] = safe_url(item)
