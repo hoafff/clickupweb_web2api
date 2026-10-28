@@ -536,3 +536,18 @@ The third test checks response **length**, not that the final sentence finished.
 The new request may consume upstream allowance. See [live acceptance and remaining completion research](docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md).
 
 **Next engineering gates:** independently verify an actual UI/WS generation-complete signal, controlled browser recovery/re-login, then test genuine function/tool calls before treating this as a coding-agent backend. Current local-only text gateway is operational, but not production/cloud ready.
+
+
+## Live 9Router end-marker acceptance (2026-10-28)
+
+The user ran an actual 9Router :20128 → local Gateway :8787 → ClickUp Brain² request with **`--min-reply-chars 200 --expect-suffix END_BRAIN_TEST`**. Observed `9Router -> Brain Gateway -> ClickUp: PASS`, `Expected response suffix observed`, **668 characters**, JSON. This is strong end-to-end proof that the **requested trailing marker** was transported. It **does not** prove an upstream end-of-generation signal. The `chatCommentCreated` event only proves creation of a matching reply comment; `finish_reason=null` and buffered-only SSE remain correct.
+
+New **offline, read-only, metadata-only** audit tool `tools/audit_brain_completion_metadata.py` helps investigate which known candidate completion indicators appear in a *private authorized local WS capture*. It emits only fixed-key counters and never prints raw private messages, IDs, cookies or tokens. The audit does not send ClickUp requests, alter the browser, or validate a completion protocol. For an existing local private capture:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\audit_brain_completion_metadata.py artifacts\brain_v3_private_content.jsonl
+```
+
+If the trace file is missing, no additional action is required; never upload it to GitHub, ChatGPT, 9Router or CI. A zero candidate count is inconclusive. Detailed live acceptance: [docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md](docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md). Next goals remain verified completion state, controlled browser session recovery, and real tool-call interoperability rather than declaring a production-ready coding-agent backend.
