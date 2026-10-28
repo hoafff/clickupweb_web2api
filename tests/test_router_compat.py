@@ -150,9 +150,45 @@ class RouterHTTPTests(unittest.TestCase):
                 self.assertEqual(r.status_code, 422, r.text)
         self.assertEqual(self.engine.calls, [])
 
+    def test_40k_character_text_prompt_passes_router_gateway_validation(self):
+        # Tests the local facade only. No Playwright, 9Router or ClickUp used.
+        long_prompt = ("Mã nguồn tiếng Việt. " * 2200)[:40000]
+        self.assertEqual(len(long_prompt), 40000)
+        response = self.client.post(
+            "/v1/chat/completions", headers=AUTH,
+            json=self.request(messages=[{
+                "role": "user", "content": long_prompt,
+            }]),
+        )
+        self.assertEqual(response.status_code, 200, response.text[:200])
+        self.assertEqual(self.engine.calls, [long_prompt])
+
+    def test_exact_50k_boundary_accepts_and_50k_plus_one_rejects(self):
+        exact = "a" * 50000
+        accepted = self.client.post(
+            "/v1/chat/completions", headers=AUTH,
+            json=self.request(messages=[{"role": "user", "content": exact}]),
+        )
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(len(self.engine.calls[0]), 50000)
+        rejected = self.client.post(
+            "/v1/chat/completions", headers=AUTH,
+            json=self.request(messages=[{
+                "role": "user", "content": "PRIVATE_SHOULD_NOT_LEAK_" + "b" * 50001,
+            }]),
+        )
+        self.assertEqual(rejected.status_code, 422)
+        self.assertEqual(len(self.engine.calls), 1)
+        self.assertNotIn("PRIVATE_SHOULD_NOT_LEAK", rejected.text)
+        self.assertEqual(
+            self.client.get("/v1/session/diagnostics", headers=AUTH).json()[
+                "http_chat_rejected_message_too_long"
+            ], 1,
+        )
+
     def test_rejects_history_exceeding_composer(self):
         body = self.request(messages=[
-            {"role": "system", "content": "x" * 7900},
+            {"role": "system", "content": "x" * 49900},
             {"role": "user", "content": "Hello"},
         ])
         r = self.client.post("/v1/chat/completions", headers=AUTH, json=body)
