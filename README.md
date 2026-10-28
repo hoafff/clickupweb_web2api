@@ -349,7 +349,7 @@ Không dùng `Set-ExecutionPolicy` hoặc mở Terminal Administrator. Với gat
 
 [**Full findings, security model and live commands**](docs/17_STICKY_CONTEXT_EXCLUSIVE_SESSION.md). Trong live HTTP test **2 request liên tiếp**, Brain trả lời `ALPHA` và `You asked me to say ALPHA.`; `/v1/session/diagnostics` xác nhận `last_relation=same` với `same_conversation_pairs=1`. **Mỗi request API hiện KHÔNG tự tạo chat mới.**
 
-Đã thêm **optional strict mode** để tránh client khác gửi nhầm vào cùng browser conversation. Legacy mode (không có `--require-session`) vẫn giữ nguyên cho một người dùng local. Strict mode dùng một owner capability độc lập với ClickUp token, claim một lần; không phải multi-user isolation hoàn chỉnh và chưa chạy live:
+Đã thêm **optional strict mode** để tránh client khác gửi nhầm vào cùng browser conversation. Legacy mode (không có `--require-session`) vẫn giữ nguyên cho một người dùng local. Strict mode dùng một owner capability độc lập với ClickUp token, claim một lần; không phải multi-user isolation hoàn chỉnh. **Đã PASS live 2 lượt HTTP**: claim thành công, `ALPHA` → `You asked me to say ALPHA.`, diagnostics `same=1`.
 
 ```powershell
 # PowerShell 1: dừng gateway cũ và đóng Chromium; pull rồi khởi động lại
@@ -370,3 +370,18 @@ cd E:\Toolss\clickuptoapi
 ```
 
 Python client không cần `.ps1` nên không gặp PowerShell ExecutionPolicy. Owner capability được lưu ở `.local/browser-owner.key` (plaintext, Git-ignored); không commit, tải lên, tiết lộ. **Nếu đã claim trong một gateway cũ**, cần dừng gateway và kiểm tra trạng thái, rồi xóa file token cũ trước khi tạo phiên mới — không ghi đè khi worker đang chạy. Chỉ kiểm thử trong session nghiên cứu của bạn. Không mở port public hoặc triển khai cloud trước khi có cách tạo chat mới/re-auth và session isolation thực sự.
+
+
+### Fix Chromium luôn mở Workspace Overview thay vì Brain²
+
+**Nguyên nhân gốc:** Gateway trước đó mặc định `--url https://app.clickup.com/`, dẫn tới trang Overview. Bản mới nhớ URL Brain đã xác minh trong `.local/brain-start-url.txt` và **tự mở thẳng Brain** ở lần khởi động kế tiếp. File này chỉ chứa đường dẫn `/WORKSPACE_ID/ai/brain`, tuyệt đối **không** lưu `?conversationId=...` hay auth/cookie. Không commit `.local/`.
+
+Cập nhật `git pull`, dừng gateway cũ bằng `Ctrl+C`, đóng Chromium đó rồi khởi động lại. **Lần đầu sau cập nhật** nếu chưa có file nhớ URL có thể vẫn mở Overview; bạn vào Brain² Ask như bình thường và nhấn Enter tại terminal để lưu. **Lần tiếp theo** đã tự vào Brain. Nếu muốn đi thẳng ngay lần đầu:
+
+```powershell
+.\.venv\Scripts\python.exe tools\local_gateway.py --port 8787 --require-session --url 'https://app.clickup.com/<WORKSPACE_ID>/ai/brain'
+```
+
+Tự điền `WORKSPACE_ID` từ URL Brain trên trình duyệt của bạn, không thêm `?conversationId`. Đây là Brain landing route, không khôi phục một chat cụ thể. Cơ chế API owner token vẫn hoạt động như trước. Khi restart gateway mới, token `.local/browser-owner.key` của worker cũ sẽ không dùng lại được: dừng worker cũ và xóa **riêng file owner key cũ** trước khi `--claim-session` lại. **Giữ nguyên** `.local/gateway.key` và `.local/browser-profile/` (lưu session trình duyệt).
+
+Xem [hướng dẫn và kiểm chứng](docs/17_STICKY_CONTEXT_EXCLUSIVE_SESSION.md).
