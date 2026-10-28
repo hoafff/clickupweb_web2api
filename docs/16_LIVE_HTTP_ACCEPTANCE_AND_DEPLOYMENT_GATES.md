@@ -25,7 +25,7 @@ Turn the validated **single-process, single-account, visible-browser localhost p
 |---|---|---|---|---|
 | G-01 | `tools/local_gateway.py` | Authenticated localhost JSON request → UI → WS reply | Live request returns `OK` | **DONE** |
 | G-02 | Windows HTTP client | Explicit UTF-8 bytes, no secret on console | Live non-ASCII payload accepted; Windows PowerShell mock CI passes | **DONE** |
-| G-03 | Browser session state | Authenticated diagnostics compare consecutive replies' conversation IDs in memory without printing IDs | Mock tests + 2 live requests and observed `same/different` classification | **IN PROGRESS — diagnostics implemented, live unverified** |
+| G-03 | Browser session state | **Live sticky context proven** (two sequential replies same conversation), exclusive owner lease implemented | Live `same=1`, lease/strict-mode tests; strict live test still pending | **IN PROGRESS — sticky behavior VERIFIED, strict owner LIVE UNVERIFIED** |
 | G-04 | Browser worker resilience | Observe browser/tab disappearance, login expiry and WS reconnect without silently treating session as ready | Controlled offline tests + authorized live recovery drill | **TODO** |
 | G-05 | API error contract | Explicit timeout, 401, 429, 502, 503, cancellation, no duplicate UI submissions | Regression tests for all cases; safe log output | **IN PROGRESS** |
 | G-06 | Model/effort UI selection | Verified DOM selectors and explicit confirmation for each supported model/effort | Two controlled model/effort live sends + HTTP request verification | **TODO** |
@@ -113,4 +113,8 @@ The first HTTP E2E pass used `model=clickup-ui-current`, which means **whatever 
 
 ## 7. Next Action
 
-**Prioritize G-03 (explicit chat lifecycle and context isolation)**. It is a correctness prerequisite for a service that could later handle multiple remote clients. Then G-04/G-05 (recoverable session and error semantics); only afterwards attempt G-07/G-08 cloud worker packaging.
+**The user completed G-03 live diagnosis:** request #1 returned `ALPHA`, request #2 returned `You asked me to say ALPHA.`, and diagnostics reported `completed_replies=2`, `same_conversation_pairs=1`, `different_conversation_pairs=0`, `last_relation=same`. This verifies sticky conversation context in the tested session.
+
+See [17 — Exclusive Session Owner Lease](17_STICKY_CONTEXT_EXCLUSIVE_SESSION.md). The **optional** `--require-session` mode (claim-once, per-request owner capability, fail-closed on unexpected WS conversation change) and Python client were added with mock/CI tests; **the strict version still needs one authorized live run**. Do not assume the lease itself creates distinct ClickUp conversations or authorizes public multi-user hosting.
+
+After this controlled live validation, prioritize G-04/G-05 (recoverable browser session and request failure handling), then G-07/G-08 for remote worker packaging/security review.
