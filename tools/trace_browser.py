@@ -47,6 +47,7 @@ NUMERIC_RE = re.compile(r"^[0-9]{5,}$")
 LONG_TOKEN_RE = re.compile(r"^[a-zA-Z0-9_~-]{22,}$")
 HEX_RE = re.compile(r"^[0-9a-fA-F]{16,}$")
 HEX_EMBEDDED_RE = re.compile(r"(?:token|key|session|auth)", re.I)
+MIXED_OPAQUE_RE = re.compile(r"^(?=.{10,}$)(?=.*[a-zA-Z])(?=.*[0-9])[a-zA-Z0-9_-]+$")
 SAFE_KEY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_:\-]{0,49}$")
 
 
@@ -57,7 +58,7 @@ def _mask_segment(segment: str) -> str:
         return "{id}"
     if NUMERIC_RE.fullmatch(segment) or HEX_RE.fullmatch(segment):
         return "{id}"
-    if LONG_TOKEN_RE.fullmatch(segment):
+    if LONG_TOKEN_RE.fullmatch(segment) or MIXED_OPAQUE_RE.fullmatch(segment):
         return "{token}"
     if HEX_EMBEDDED_RE.search(segment) and "=" in segment:
         return "{token}"
@@ -122,6 +123,21 @@ def request_json_keys(request: Request) -> list[str]:
     return describe_json_keys(data)
 
 
+def ws_json_key_paths(data: str | bytes) -> list[str]:
+    """Parse JSON frames and retain schema *only*, no payload values.
+
+    Unknown frame encodings are intentionally not guessed; mark them as
+    unrecognized rather than logging raw fragments.
+    """
+    if not isinstance(data, str):
+        return []
+    try:
+        parsed = json.loads(data)
+    except (ValueError, TypeError):
+        return []
+    return describe_json_keys(parsed, max_depth=3, max_keys=30)
+
+
 def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
@@ -144,9 +160,10 @@ class TraceSink:
 
 
 class NetworkObserver:
-    def __init__(self, sink: TraceSink, hosts: tuple[str, ...]) -> None:
+    def __init__(self, sink: TraceSink, hosts: tuple[str, ...], capture_ws_schema: bool = False) -> None:
         self.sink = sink
         self.hosts = hosts
+        self.capture_ws_schema = capture_ws_schema
         self._request_starts: dict[int, float] = {}
         self._seen_pages: set[int] = set()
 
@@ -233,6 +250,7 @@ class NetworkObserver:
                 direction=direction,
                 payload_length=len(data),
                 payload_type="binary" if isinstance(data, bytes) else "text",
+                json_key_paths=ws_json_key_paths(data) if self.capture_ws_schema else [],
             )
 
         ws.on("framesent", lambda data: frame("sent", data))
@@ -255,6 +273,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=DEFAULT_TRACE_PATH)
     parser.add_argument("--profile-dir", type=Path, default=DEFAULT_PROFILE_PATH)
     parser.add_argument("--timeout", type=int, default=45, help="Navigation timeout seconds")
+    parser.add_argument("--capture-ws-schema", action="store_true", help="Record JSON key paths from WebSocket frames (never values); opt-in")
     return parser.parse_args()
 
 
@@ -293,7 +312,7 @@ async def main() -> int:
                 headless=False,
                 accept_downloads=False,
             )
-            observer = NetworkObserver(sink, hosts)
+            observer = NetworkObserver(sink, hosts, capture_ws_schema=args.capture_ws_schema)
             observer.watch_context(context)
 
             page = context.pages[0] if context.pages else await context.new_page()
@@ -308,11 +327,24 @@ async def main() -> int:
                 print("Use the browser window manually if needed.")
 
             print("Navigate to Brain, sign in normally, send test prompts and switch models.")
-            print("Press ENTER in this terminal to stop recording.")
-            try:
-                await asyncio.to_thread(input)
-            except (EOFError, KeyboardInterrupt):
-                pass
+            print("Type 'mark max_first', 'mark opus_reply', etc. to timestamp UI actions.")
+            print("Press ENTER, or type 'stop', to end recording.")
+            while True:
+                try:
+                    line = (await asyncio.to_thread(input)).strip()
+                except (EOFError, KeyboardInterrupt):
+                    break
+                if not line or line.lower() in {"stop", "quit", "q"}:
+                    break
+                if line.lower().startswith("mark "):
+                    label = line[5:].strip()
+                    if re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", label):
+                        sink.write("manual_marker", label=label)
+                        print(f"Marker recorded: {label}")
+                    else:
+                        print("Marker must be 1-32 letters, digits, '_' or '-'.")
+                else:
+                    print("Use 'mark NAME' or ENTER to finish.")
             await asyncio.sleep(0.3)
             await context.close()
     finally:
