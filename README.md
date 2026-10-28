@@ -75,7 +75,9 @@ Trình duyệt mở ở chế độ nhìn thấy được. Đăng nhập bằng 
 - [x] Tạo FastAPI JSON facade localhost, auth Bearer, đơn request, mock tests trên Windows/Linux.
 - [x] Live HTTP→Playwright→ClickUp→WS→JSON response E2E: request UTF-8 trên Windows PowerShell trả về `OK`.
 - [x] Authenticated `/v1/session/diagnostics` so sánh conversation IDs trong bộ nhớ, **không lộ ID** (mock CI).
-- [ ] Chạy 2 HTTP prompts liên tiếp để kiểm tra `same/different` thực tế.
+- [x] Chạy 2 HTTP prompts live liên tiếp: `ALPHA` → `You asked me to say ALPHA.`, `same_conversation_pairs=1`, `different_conversation_pairs=0`.
+- [x] Thêm tùy chọn `--require-session`: claim-once owner token, strict conversation continuity (mock/CI).
+- [ ] Live E2E strict owner mode và nghiên cứu UI tạo new chat riêng.
 - [ ] Streaming/SSE, model switch tự động, quota/usage, multi-session và cloud hosting.
 
 ## Nguồn
@@ -341,3 +343,30 @@ git pull
 ```
 
 Không dùng `Set-ExecutionPolicy` hoặc mở Terminal Administrator. Với gateway đang chạy, **không cần restart** chỉ vì thêm Python client. Chờ câu trả lời request 1 xong rồi mới gửi request 2. Diagnostics nếu có 2 phản hồi thành công sẽ cho biết `last_relation=same/different/unknown`; không trả conversation ID thật. Cùng `conversation_id` **không đồng nghĩa chứng minh trí nhớ model**. Nếu gateway trả 502 / 503, xem lại browser, không tự động gửi lại prompt vì nó có thể đã được submit.
+
+
+## Sticky conversation confirmed + exclusive owner mode (G-03)
+
+[**Full findings, security model and live commands**](docs/17_STICKY_CONTEXT_EXCLUSIVE_SESSION.md). Trong live HTTP test **2 request liên tiếp**, Brain trả lời `ALPHA` và `You asked me to say ALPHA.`; `/v1/session/diagnostics` xác nhận `last_relation=same` với `same_conversation_pairs=1`. **Mỗi request API hiện KHÔNG tự tạo chat mới.**
+
+Đã thêm **optional strict mode** để tránh client khác gửi nhầm vào cùng browser conversation. Legacy mode (không có `--require-session`) vẫn giữ nguyên cho một người dùng local. Strict mode dùng một owner capability độc lập với ClickUp token, claim một lần; không phải multi-user isolation hoàn chỉnh và chưa chạy live:
+
+```powershell
+# PowerShell 1: dừng gateway cũ và đóng Chromium; pull rồi khởi động lại
+cd E:\Toolss\clickuptoapi
+git pull
+$env:CLICKUP_GATEWAY_API_KEY = (Get-Content -Raw .local\gateway.key).Trim()
+.\.venv\Scripts\python.exe tools\local_gateway.py --port 8787 --require-session
+```
+
+Đăng nhập/mở Brain² và nhấn Enter khi được hỏi, sau đó **PowerShell 2**:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --claim-session
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --prompt "Reply with the word ALPHA only."
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --prompt "What word did I ask you to say in my previous message?"
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --diagnostics
+```
+
+Python client không cần `.ps1` nên không gặp PowerShell ExecutionPolicy. Owner capability được lưu ở `.local/browser-owner.key` (plaintext, Git-ignored); không commit, tải lên, tiết lộ. **Nếu đã claim trong một gateway cũ**, cần dừng gateway và kiểm tra trạng thái, rồi xóa file token cũ trước khi tạo phiên mới — không ghi đè khi worker đang chạy. Chỉ kiểm thử trong session nghiên cứu của bạn. Không mở port public hoặc triển khai cloud trước khi có cách tạo chat mới/re-auth và session isolation thực sự.
