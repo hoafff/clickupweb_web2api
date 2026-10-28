@@ -25,6 +25,7 @@ GATEWAY_KEY_FILE = ROOT / ".local" / "gateway.key"
 MODEL = "brain/clickup-ui-current"
 ALLOWED_MODEL = re.compile(r"^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$")
 MAX_BODY = 2_000_000
+DEFAULT_TEST_PROMPT = "Reply with exactly OK."
 
 
 class RouterPathError(Exception):
@@ -223,11 +224,24 @@ def parse_models(text: str) -> list[str]:
 
 
 def chat_once(*, model: str, port: int, key: str | None,
-              stream: bool = False) -> tuple[str, str]:
+              stream: bool = False, prompt: str = DEFAULT_TEST_PROMPT,
+              history: bool = False) -> tuple[str, str]:
+    """Test a single text prompt or a complete small history through 9Router."""
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 7600:
+        raise RouterPathError("Prompt must be 1..7600 non-blank characters.")
+    if history:
+        messages = [
+            {"role": "system", "content": "Respond concisely to the final user turn."},
+            {"role": "user", "content": "Remember the word ALPHA."},
+            {"role": "assistant", "content": "ALPHA"},
+            {"role": "user", "content": prompt},
+        ]
+    else:
+        messages = [{"role": "user", "content": prompt}]
     body = {
         "model": model,
-        "messages": [{"role": "user", "content": "Reply with exactly OK."}],
-        "stream": bool(stream),  # critical for 9Router versions with stream default bug
+        "messages": messages,
+        "stream": bool(stream),  # explicit for 9Router versions with stream-default bug
     }
     status, headers, text = request_router(
         port=port, path="/v1/chat/completions", key=key, body=body
@@ -257,7 +271,19 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--port", type=int, default=20128)
     p.add_argument("--model", default=MODEL, help="Prefixed 9Router model name")
-    p.add_argument("--stream", action="store_true", help="Test SSE path")
+    p.add_argument("--stream", action="store_true", help="Test buffered SSE via 9Router")
+    p.add_argument(
+        "--prompt", default=None,
+        help="Harmless test text; visible in local shell history, avoid secrets",
+    )
+    p.add_argument(
+        "--history", action="store_true",
+        help="Send a four-message JSON transcript to test role/history mapping",
+    )
+    p.add_argument(
+        "--min-reply-chars", type=int, default=0,
+        help="Fail if response is shorter than N characters (long-answer smoke test)",
+    )
     p.add_argument("--models-only", action="store_true", help="List model IDs without sending a prompt")
     p.add_argument("--save-key", action="store_true", help="Prompt for and store 9Router client key privately")
     p.add_argument("--key-file", type=Path, default=KEY_FILE)
@@ -268,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if not ALLOWED_MODEL.fullmatch(args.model) or len(args.model) > 128:
             raise RouterPathError("Invalid prefixed 9Router model name.")
+        if not 0 <= args.min_reply_chars <= 100_000:
+            raise RouterPathError("--min-reply-chars must be 0..100000.")
         key = read_key(args.key_file)
         # Model discovery may be public. Enforce auth-role safety specifically
         # before CHAT dispatch so --models-only still helps diagnosis.
@@ -293,8 +321,19 @@ def main(argv: list[str] | None = None) -> int:
             )
         print("9Router model discovery: PASS")
         answer, kind = chat_once(
-            model=args.model, port=args.port, key=key, stream=args.stream
+            model=args.model, port=args.port, key=key, stream=args.stream,
+            prompt=(
+                args.prompt if args.prompt is not None
+                else ("What word did I tell you to remember? Answer only that word."
+                      if args.history else DEFAULT_TEST_PROMPT)
+            ),
+            history=args.history,
         )
+        if len(answer) < args.min_reply_chars:
+            raise RouterPathError(
+                "9Router delivered a response shorter than the requested "
+                "minimum; do not treat this long-answer test as PASS."
+            )
         print("9Router -> Brain Gateway -> ClickUp: PASS")
         print("Response:", "SSE" if args.stream else "JSON", "(no true token-stream claim)")
         print("Reply characters:", len(answer))
