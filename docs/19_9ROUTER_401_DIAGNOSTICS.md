@@ -106,3 +106,33 @@ When both boundaries are corrected, first try:
 Only after JSON is successful, optionally run `--stream`. Do not retry a request automatically on a 502/503 because the underlying UI may already have submitted it. Successful 9Router routing remains **LIVE UNVERIFIED** until the user supplies the `9Router -> Brain Gateway -> ClickUp: PASS` output.
 
 The resulting gateway still supports only text, buffered SSE and manually chosen ClickUp UI model; it does not implement native tool calls, real-time tokens or independent cloud hosting.
+
+
+## Confirmed configuration mistake — same key used for both authentication roles
+
+The researcher clarified that the **same exact value** from `.local/gateway.key` was entered into **9Router Bulk/upstream configuration** and also saved via `check_9router_path.py --save-key` into `.local/ninerouter.key`. The subsequent 9Router chat returned `invalid_api_key`.
+
+**Interpretation:** the upstream Gateway key is accepted by the ClickUp Gateway only. Importing it into a 9Router provider or Bulk upstream connection does **not** issue a downstream 9Router API key in the local 9Router key database. The exact 401 from port `20128` is therefore consistent with its own client-auth check. A second 9Router process is another possibility if a freshly issued client key still fails; use the PID diagnostic later only if needed.
+
+### Correct fix — no Gateway restart necessary
+
+1. In 9Router dashboard **on port 20128**, go to **API Keys** / **Endpoints → API Keys**, create a **new client-facing key**. Copy it privately.
+2. In the **Custom Provider** for `brain/clickup-ui-current`, KEEP the existing `8787` Base URL and the existing upstream key from `.local/gateway.key`. Do not paste the newly issued client key into that connection.
+3. In PowerShell 2, overwrite **only the stale local 9Router client key file**, never the Gateway/browser credentials:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+Remove-Item .local\ninerouter.key
+.\.venv\Scripts\python.exe tools\check_9router_path.py --save-key
+
+# Validate via local 9Router port 20128 without manually exposing keys
+.\.venv\Scripts\python.exe tools\check_9router_path.py --models-only
+.\.venv\Scripts\python.exe tools\check_9router_path.py
+```
+
+The `--save-key` prompt hides the input and writes `.local/ninerouter.key` in the Git-ignored folder; the value is **NOT** supposed to match `.local/gateway.key`. New versions of `check_9router_path.py` now compare the two files locally using `hmac.compare_digest` and **stop before sending any chat** if they are identical. This is a defensive configuration guard, not an assumption that a key's literal string uniquely establishes authorization; 9Router's server database still decides what it accepts.
+
+Only after JSON is successful try `--stream`. If the newly issued client key still fails with `invalid_api_key`, identify the PID of 9Router at port 20128 and inspect its API Keys page to ensure that the dashboard and the API listener use the same data directory.
+
+**References:** 9Router's documentation instructs generating an API key from the dashboard and using it as `Authorization: Bearer ...`: https://github.com/decolua/9router/blob/master/gitbook/content/en/troubleshooting.md. The related investigation of `invalid_api_key` at `/v1/chat/completions` is https://github.com/decolua/9router/discussions/4650.
