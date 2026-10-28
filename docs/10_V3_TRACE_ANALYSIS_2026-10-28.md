@@ -63,11 +63,23 @@ Có `comment_threads[].thread_ai_models[].models[]` và `comments[].data.comment
 - Chưa có bằng chứng về usage token, tool routing, memory, file attachments.
 - Không kiểm thử API replay/direct-client; trạng thái adapter: **NOT IMPLEMENTED**.
 
-## 4. Kiểm tra bảo mật
+## 4. Correlation IDs phát hiện event vượt qua marker
+
+Đã đối chiếu **trong bộ nhớ**, không đưa giá trị ID ra ngoài, các trường:
+- `aiConversationStarted.event.payload.ai_result_id`, `conversation_id`;
+- `chatCommentCreated.event.version_event_data.changes[].field/after` khi `field` là `ai_result_id` hoặc `conversation_id`.
+
+Kết quả: **7/8** `aiConversationStarted` tìm thấy `chatCommentCreated` cùng `ai_result_id` và `conversation_id` **trong đúng khoảng pha**, trường hợp còn lại **không mất**: sự kiện liên quan được ghi trong pha **kế tiếp**.
+
+Chi tiết: lượt bắt đầu ở `opus_low#5` lúc **05:38:25.569 UTC**, còn `chatCommentCreated` tương ứng được ghi lúc **05:38:59.085 UTC**, **sau marker `opus_low#6`** (05:38:56.579 UTC). Vì vậy marker không phải boundary hoàn tất bất đồng bộ; chỉ dùng timestamp để gom WS events có thể gán sai. **Cần join theo ID trong bộ nhớ** rồi mới xuất báo cáo đã bỏ IDs.
+
+**Điều này nâng mức tin cậy** rằng WebSocket đảm nhiệm các sự kiện lifecycle AI ↔ comment; nhưng `chatCommentCreated` vẫn không đủ bằng chứng chứng minh đây là delta-token stream hay đã kết thúc suy luận.
+
+## 5. Kiểm tra bảo mật
 
 Dù tracer có best-effort redaction, JSON private có thể vẫn chứa **analytics writeKey, user/workspace IDs, conversation IDs, message text và metadata**. Tuyệt đối không commit file private JSONL hay gửi công khai. Bản V4 nên bổ sung redaction `writeKey`, thông tin định danh và bộ xuất báo cáo chỉ chứa key paths + các giá trị model/effort cần nghiên cứu. Cần review cả file summary trước khi public vì masked URL có thể chứa các đoạn path không ngẫu nhiên.
 
-## 5. Next priorities
+## 6. Next priorities
 
 1. Mở rộng analyzer để tự gắn `label#n` theo marker occurrence, nhận diện `click` vs `use`, HTTP failure vs 201, các WS AI lifecycle events.
 2. So sánh response/WS event chain cùng `conversation_id` và `ai_result_id` chỉ trong bộ nhớ cục bộ; **không công bố opaque IDs**.
