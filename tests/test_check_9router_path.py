@@ -16,7 +16,7 @@ import unittest
 from unittest.mock import patch
 
 from tools.check_9router_path import (
-    ROOT, RouterPathError, chat_once, main, parse_models,
+    ROOT, RouterPathError, chat_once, classify_auth_error, main, parse_models,
     parse_stream, read_key, request_router, save_key,
 )
 from tools.router_compat import make_buffered_sse
@@ -147,6 +147,21 @@ class RouterPathTests(unittest.TestCase):
         self.assertIn("HTTP 401", unauth.stderr)
         self.assertNotIn("private-key-never-echo", unauth.stderr)
         self.assertNotIn(KEY, unauth.stdout + unauth.stderr)
+
+    def test_allowlisted_401_diagnostics_never_echo_secrets(self):
+        examples = [
+            (b'{"error":{"message":"Invalid API key","type":"authentication_error","code":"invalid_api_key"}}', "invalid_api_key"),
+            (b'{"detail":"Unauthorized"}', "unauthorized"),
+            (b'{"error":{"code":"authentication_error","message":"PRIVATE-TOKEN-DO-NOT-LOG"}}', "authentication_error"),
+            (b'{"error":{"message":"PRIVATE-TOKEN-DO-NOT-LOG"}}', "not recognized"),
+        ]
+        for raw, expected in examples:
+            with self.subTest(expected=expected):
+                classification = classify_auth_error(401, raw)
+                self.assertIn(expected, classification)
+                self.assertNotIn("PRIVATE-TOKEN-DO-NOT-LOG", classification)
+        self.assertEqual(classify_auth_error(500, b'{"detail":"private"}'), "")
+        self.assertIn("unrecognized", classify_auth_error(401, b'not-json'))
 
     def test_model_alias_must_appear_in_9router_catalog(self):
         result = self.run_cli("--model", "brain/not-advertised")
