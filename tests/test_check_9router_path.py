@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 from tools.check_9router_path import (
@@ -221,6 +222,23 @@ class RouterPathTests(unittest.TestCase):
                       "stream": False},
             )
         self.assertNotIn(KEY, str(cm.exception))
+
+    def test_9router_timeout_distinct_from_transport_and_never_leaks(self):
+        class FakeOpener:
+            def open(self, *_args, **_kwargs):
+                raise urllib.error.URLError(
+                    TimeoutError("PRIVATE_TIMEOUT_CONTEXT_NEVER_ECHO")
+                )
+        with patch("tools.check_9router_path.urllib.request.build_opener",
+                   return_value=FakeOpener()):
+            with self.assertRaisesRegex(RouterPathError, "timed out") as caught:
+                request_router(
+                    port=self.port, path="/v1/chat/completions", key=KEY,
+                    body={"model": MODEL, "stream": False,
+                          "messages": [{"role": "user", "content": "ok"}]},
+                )
+        self.assertNotIn("PRIVATE_TIMEOUT_CONTEXT", str(caught.exception))
+        self.assertIn("may already", str(caught.exception))
 
     def test_client_key_matching_gateway_secret_blocked_before_chat(self):
         upstream = Path(self.tmp.name) / "gateway.key"
