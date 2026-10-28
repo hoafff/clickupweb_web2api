@@ -480,20 +480,23 @@ async def serve(args: argparse.Namespace, api_key: str) -> None:
             access_log=False, log_level="warning",
         )
         print(f"LOCAL API ready at http://127.0.0.1:{args.port}")
-        print("Only model=clickup-ui-current and one user message are supported.")
         if args.router_mode:
             print("9ROUTER BASIC MODE: isolated fresh Brain chat per request.")
-            print("SSE is buffered after the reply-created event; no real token stream.")
-            print("Only text, no native role hierarchy or tool calls.")
-        if args.require_session:
+            print("Model: clickup-ui-current; text-only Chat Completions.")
+            print("stream=true: buffered SSE AFTER reply-created event, "
+                  "not real token streaming; no token usage accounting.")
+            print("No native role hierarchy, function calls or multimodal input.")
+        elif args.require_session:
             print("EXCLUSIVE MODE: POST /v1/session/claim first; "
                   "send X-ClickUp-Session on chat/diagnostics.")
             print("No session release: close and inspect/restart the browser "
                   "before assigning it to another owner.")
+            print("Only one user message, no SSE/token usage accounting.")
         else:
             print("LEGACY MODE: all authorized HTTP calls share browser history. "
                   "Do not expose this to other users.")
-        print("No streaming, no token usage accounting; Ctrl+C to close.")
+            print("Only one user message, no SSE/token usage accounting.")
+        print("Ctrl+C to close.")
         server = uvicorn.Server(config)
         await server.serve()
 
