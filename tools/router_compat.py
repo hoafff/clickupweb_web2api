@@ -12,8 +12,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from tools.prompt_limits import MAX_PROMPT_CHARS
+
 MODEL_ID = "clickup-ui-current"
-MAX_PROMPT_CHARS = 8_000
 MAX_MESSAGES = 32
 
 
@@ -73,7 +74,7 @@ def flatten_messages(messages: list[RouterMessage]) -> str:
         )
     if not text.strip() or len(text) > MAX_PROMPT_CHARS:
         raise ValueError(
-            "Compiled transcript exceeds the Brain composer 8000 character limit."
+            f"Compiled transcript exceeds the experimental Gateway {MAX_PROMPT_CHARS}-character text limit."
         )
     return text
 
