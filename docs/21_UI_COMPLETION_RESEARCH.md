@@ -161,3 +161,63 @@ The user's currently running Gateway can remain started; `git pull` updates the 
 - Received + `http_chat_401` increasing → Gateway rejected upstream API credentials.
 
 All counters start fresh with each Gateway process. They do not contain prompt, account/workspace ID, token or returned content. An HTTP error after the UI click may still have consumed upstream resources; **do not auto-retry**.
+
+## 2026-10-28 — Post-failure diagnostics: one successful HTTP chat, one failed
+
+The operator provided the actual **same-process** results:
+
+```text
+GET /v1/research/ui-state
+  page_is_brain=true; composer_visible=true
+  stop_candidate_count=0
+  stop_near_composer_count=0
+  generating_candidate_count=0
+
+GET /v1/session/diagnostics
+  completed_replies=1
+  same_conversation_pairs=0; different_conversation_pairs=0
+  last_relation=first
+  http_chat_received=2
+  http_chat_2xx=1
+  http_chat_401=0
+  http_chat_other_errors=1
+```
+
+**Proven:** Gateway received exactly two chat POSTs since the current Gateway process started; one returned HTTP 2xx, one returned an error other than 401. Exactly one reply-created event was confirmed by the Browser worker. The current UI metadata probe still works and the Stop-like control is absent. The original failed request **cannot be retroactively classified** into status 422/429/502/503 because the old HTTP counter grouped them together.
+
+**Important source-code inference, not definitive attribution:** `LiveBrowserEngine.complete` sets `_degraded=True` on exceptions during UI navigation, send or WS reply correlation; `snapshot_ui_state` then refuses observations. Because the authenticated snapshot still works, a pre-worker rejection (e.g. 422 validation, 429 busy, or another router attempt) is worth checking before claiming a Playwright/WS failure. The 2 POSTs cannot be attributed to specific user commands without a trace or request ID, and the one good answer might come from a different request.
+
+### Implementation: safe exact-status counters for future requests
+
+Updated `tools/local_gateway.py` to count the following *additional* HTTP POST statuses as aggregate integers, also surfaced by `tools/send_gateway_request.py --diagnostics`:
+
+| Diagnostic key | What it distinguishes |
+|---|---|
+| `http_chat_422` | Request schema or transcript rejected BEFORE browser send |
+| `http_chat_429` | Browser worker occupied by another request |
+| `http_chat_502` | Ambiguous UI send/correlation failure; worker may be degraded |
+| `http_chat_503` | Worker not ready/degraded, isolated-chat precondition failed |
+
+Existing `http_chat_received`, `http_chat_2xx`, `http_chat_401`, `http_chat_other_errors` are retained. All values are nonnegative integers, never request bodies, keys, prompts, IDs, raw headers or exception strings. CI tests exercise all four response statuses and the no-leak client allowlist.
+
+**Operational limitation:** The new counters are instantiated on Gateway startup. Running `git pull` updates the CLI immediately, but **requires restarting Gateway** to load the server-side counter code. Restart resets all counters to zero, so it **cannot recover the old failed request's status**. Do not resend the previous long prompt just to populate counters; it has already reached ClickUp and may have consumed credits.
+
+### No-credit next action
+
+In PowerShell 2 while current Gateway remains running:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+Invoke-RestMethod http://127.0.0.1:8787/healthz
+.\.venv\Scripts\python.exe tools\check_brain_ui_state.py --snapshot
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --diagnostics
+```
+
+Then inspect the already-existing 9Router request log at the approximate time the failed test ran, if available, looking ONLY for the **numeric HTTP status**. Redact content, URLs with tokens, auth headers, models that include private information, and browser identifiers. No new AI prompt is required.
+
+**Only if future test requests are needed:** Restart the Gateway *after verifying no AI generation is pending*, retaining the same private profile and key, with `--router-mode --ui-research`; then the new HTTP counters will distinguish future failures. Do not infer server-side generation completion or implement unsafe automatic retries from the Stop-control hint.
+
+### Follow-up engineering hypothesis
+
+Because `--drive-router` sent one explicit prompt but Gateway reported two POSTs since process start, inspect whether 9Router has an existing probe/retry, a separate earlier call, or overlapping clients. Two POSTs in a cumulative counter do **not** prove 9Router retried the same request. A request log timestamp/status or safe per-request tracing is needed. The durable fix should be based on that evidence rather than inflating timeouts or disabling concurrency protections.
