@@ -115,7 +115,9 @@ class UIStateUnitTests(unittest.TestCase):
 class UIResearchEndpointTests(unittest.TestCase):
     def test_off_by_default_even_with_valid_authorization(self):
         stub = StubEngine()
-        with TestClient(create_app(stub, api_key=KEY, router_mode=True)) as client:
+        with TestClient(create_app(
+            stub, api_key=KEY, router_mode=True,
+        ), base_url="http://127.0.0.1:8787") as client:
             r = client.get("/v1/research/ui-state", headers=AUTH)
             self.assertEqual(r.status_code, 404)
             self.assertEqual(stub.calls, 0)
@@ -125,7 +127,7 @@ class UIResearchEndpointTests(unittest.TestCase):
         stub.snapshot = {**SAMPLE, "prompt": PRIVATE, "cookie": PRIVATE}
         with TestClient(create_app(
             stub, api_key=KEY, router_mode=True, ui_research=True,
-        )) as client:
+        ), base_url="http://127.0.0.1:8787") as client:
             self.assertEqual(client.get("/v1/research/ui-state").status_code, 401)
             self.assertEqual(stub.calls, 0)
             r = client.get("/v1/research/ui-state", headers=AUTH)
@@ -137,7 +139,7 @@ class UIResearchEndpointTests(unittest.TestCase):
         stub = StubEngine(ready=False)
         with TestClient(create_app(
             stub, api_key=KEY, router_mode=True, ui_research=True,
-        )) as client:
+        ), base_url="http://127.0.0.1:8787") as client:
             self.assertEqual(
                 client.get("/v1/research/ui-state", headers=AUTH).status_code,
                 503,
@@ -153,7 +155,7 @@ class UIResearchEndpointTests(unittest.TestCase):
         stub = StubEngine()
         with TestClient(create_app(
             stub, api_key=KEY, require_session=True, ui_research=True,
-        )) as client:
+        ), base_url="http://127.0.0.1:8787") as client:
             self.assertEqual(
                 client.get("/v1/research/ui-state", headers=AUTH).status_code,
                 409,
