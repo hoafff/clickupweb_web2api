@@ -229,10 +229,15 @@ class LiveBrowserEngine:
                 await _send_via_ui(page, prompt, COMPOSER_CSS, SEND_CSS)
                 reply = await self.bridge.await_reply_created(timeout=self.timeout)
                 return reply.text
-            except (BrowserAdapterError, PlaywrightError, asyncio.TimeoutError,
-                    ValueError, GatewayUnavailableError) as exc:
-                # A send might have succeeded before the timeout. Repeating it
-                # or allowing another call could yield duplicate/mixed replies.
+            except asyncio.CancelledError:
+                # A disconnected HTTP client may cancel an in-flight UI send.
+                # Never accept another request until the operator has inspected
+                # the browser, because the original AI reply may arrive later.
+                self._degraded = True
+                raise
+            except Exception as exc:
+                # An unknown Playwright/DOM/WS failure may have occurred after
+                # click. Fail closed and never auto-retry a possibly sent prompt.
                 self._degraded = True
                 raise GatewaySendError() from exc
 
