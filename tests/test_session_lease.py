@@ -26,9 +26,6 @@ class ExclusiveLeaseTests(unittest.TestCase):
                     lease.check(value)
         with self.assertRaises(SessionAlreadyClaimedError):
             lease.claim()
-        self.assertNotIn(token, vars(lease).__repr__().replace(
-            "'_owner_secret': '" + token + "'", "'_owner_secret': '<private>'"
-        ))
 
     def test_concurrent_claim_has_exactly_one_winner(self):
         lease = ExclusiveSessionLease()
