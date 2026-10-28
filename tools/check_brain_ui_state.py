@@ -21,6 +21,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from typing import Callable
 
 if __package__ in (None, ""):
     _root = Path(__file__).resolve().parents[1]
@@ -35,10 +36,11 @@ from tools.check_9router_path import (
 from tools.send_gateway_request import DEFAULT_KEY_FILE, load_key, LocalClientError
 
 PROBE_PATH = "/v1/research/ui-state"
+RESEARCH_END_MARKER = "UI_RESEARCH_END"
 RESEARCH_PROMPT = (
     "Write six numbered paragraphs explaining HTTP versus WebSocket for "
     "software engineers. Include practical examples, at least two sentences "
-    "per paragraph. End your answer with exactly UI_RESEARCH_END."
+    "per paragraph. End your answer with exactly " + RESEARCH_END_MARKER + "."
 )
 
 
@@ -148,9 +150,46 @@ def observe_transitions(samples: list[dict]) -> dict:
     }
 
 
+def classify_stop_timing(
+    timed_samples: list[tuple[float, bool]],
+    router_finished_at: float,
+) -> dict[str, bool | int | None]:
+    """Relate observed Stop hints to 9Router *client return*, NOT AI completion.
+
+    Only monotonic timestamps and boolean metadata are used. A Stop exit before
+    this return is not proof of a server generation-complete event.
+    """
+    before = [state for stamp, state in timed_samples if stamp <= router_finished_at]
+    after = [state for stamp, state in timed_samples if stamp > router_finished_at]
+    return {
+        "ui_samples_before_router_return": len(before),
+        "ui_samples_after_router_return": len(after),
+        "stop_seen_before_router_return": any(before),
+        "stop_disappearance_before_router_return": any(
+            prior and not current for prior, current in zip(before, before[1:])
+        ),
+        "stop_visible_last_sample_before_router_return": (
+            before[-1] if before else None
+        ),
+        "stop_seen_after_router_return": any(after),
+    }
+
+
+def safe_research_reply_metrics(reply: str) -> dict[str, int | bool]:
+    """Check a literal public test suffix without exposing answer content."""
+    return {
+        "router_reply_characters": len(reply),
+        "router_reply_has_expected_suffix": reply.rstrip().endswith(
+            RESEARCH_END_MARKER
+        ),
+    }
+
+
 def collect(*, port: int, key: str, samples: int, interval: float,
             stop_event: threading.Event | None = None,
-            post_samples: int = 0) -> tuple[list[dict], int]:
+            post_samples: int = 0,
+            on_sample: Callable[[dict], None] | None = None,
+            ) -> tuple[list[dict], int]:
     seen: list[dict] = []
     failures = 0
     tail = 0
@@ -160,7 +199,10 @@ def collect(*, port: int, key: str, samples: int, interval: float,
             if tail > post_samples:
                 break
         try:
-            seen.append(get_snapshot(port=port, key=key))
+            snapshot = get_snapshot(port=port, key=key)
+            seen.append(snapshot)
+            if on_sample is not None:
+                on_sample(snapshot)
         except ResearchProbeError:
             failures += 1
         if index + 1 < samples:
@@ -215,39 +257,54 @@ def main(argv: list[str] | None = None) -> int:
         reject_reused_upstream_key(router_key)
         stop = threading.Event()
         outcome: dict = {}
+        timed_stop_samples: list[tuple[float, bool]] = []
+
+        def note_sample(snapshot: dict) -> None:
+            # Private local memory only. Do not save timestamps or content.
+            timed_stop_samples.append((
+                time.monotonic(), snapshot["stop_near_composer_count"] > 0,
+            ))
+
         def watcher():
             observed, failures = collect(
                 port=args.port, key=key, samples=args.samples,
                 interval=args.interval, stop_event=stop, post_samples=5,
+                on_sample=note_sample,
             )
             outcome["summary"] = summarise([baseline, *observed], failures)
 
         worker = threading.Thread(target=watcher, daemon=True)
         worker.start()
         failure = None
-        reply_length = None
+        reply_metrics = None
         request_started = time.monotonic()
         try:
             answer, _ = chat_once(
                 model=MODEL, port=args.router_port, key=router_key,
                 prompt=RESEARCH_PROMPT, stream=False,
             )
-            reply_length = len(answer)
+            reply_metrics = safe_research_reply_metrics(answer)
         except RouterPathError as exc:
             failure = classify_router_failure(exc)
         finally:
-            duration = round(time.monotonic() - request_started, 2)
+            # Capture BEFORE watcher tail samples; the router call has
+            # returned (or failed) at this point.
+            router_finished_at = time.monotonic()
+            duration = round(router_finished_at - request_started, 2)
             stop.set()
             worker.join(timeout=min(20.0, args.samples * args.interval + 8))
         if "summary" not in outcome:
             raise ResearchProbeError("UI sample thread did not finish cleanly.")
         report = outcome["summary"]
+        report.update(classify_stop_timing(
+            timed_stop_samples, router_finished_at,
+        ))
         report["router_request_elapsed_seconds"] = duration
         report["router_request_outcome"] = "error" if failure else "success"
         if failure:
             report.update(failure)
         else:
-            report["router_reply_characters"] = reply_length
+            report.update(reply_metrics)
         # Observe the UI once MORE after the HTTP caller finished or failed.
         # This is critical when sampling ended before an upstream timeout.
         try:
@@ -267,7 +324,10 @@ def main(argv: list[str] | None = None) -> int:
                 "9Router routed request failed; see the SAFE category/status "
                 "above. Do NOT retry blindly: the UI prompt may have been sent."
             )
-        print("9Router text request returned; reply character count:", reply_length)
+        print(
+            "9Router text request returned; reply character count:",
+            reply_metrics["router_reply_characters"],
+        )
         print("No generation completion was inferred from UI metadata.")
         return 0
     except (ResearchProbeError, LocalClientError, RouterPathError) as exc:
