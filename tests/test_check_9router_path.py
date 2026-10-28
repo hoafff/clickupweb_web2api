@@ -199,10 +199,19 @@ class RouterPathTests(unittest.TestCase):
                 self.assertIn("printable ASCII", rejected.stderr)
         self.assertEqual(self.server.requests, [])
 
+    def test_40k_text_is_forwarded_to_9router_mock_without_truncation(self):
+        prompt = "z" * 40000
+        reply, content_type = chat_once(
+            model=MODEL, port=self.port, key=KEY, prompt=prompt,
+        )
+        self.assertEqual(reply, "OK")
+        self.assertIn("application/json", content_type)
+        self.assertEqual(self.server.requests[-1]["body"]["messages"][0]["content"], prompt)
+
     def test_rejects_invalid_prompt_before_chat_dispatch(self):
         result = self.run_cli("--prompt", " " * 3)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("1..7600", result.stderr)
+        self.assertIn("1..50000", result.stderr)
         self.assertEqual(self.server.requests, [])
 
     def test_missing_or_wrong_key_does_not_echo_server_body(self):
