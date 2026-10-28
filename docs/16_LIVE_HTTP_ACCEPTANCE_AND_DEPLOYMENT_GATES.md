@@ -25,7 +25,7 @@ Turn the validated **single-process, single-account, visible-browser localhost p
 |---|---|---|---|---|
 | G-01 | `tools/local_gateway.py` | Authenticated localhost JSON request → UI → WS reply | Live request returns `OK` | **DONE** |
 | G-02 | Windows HTTP client | Explicit UTF-8 bytes, no secret on console | Live non-ASCII payload accepted; Windows PowerShell mock CI passes | **DONE** |
-| G-03 | Browser session state | Determine whether consecutive HTTP requests reuse one chat or create new chats; prevent unintended context mixing | Two sequential distinguishable prompts, correct reply attribution, documented conversation behavior | **TODO** |
+| G-03 | Browser session state | Authenticated diagnostics compare consecutive replies' conversation IDs in memory without printing IDs | Mock tests + 2 live requests and observed `same/different` classification | **IN PROGRESS — diagnostics implemented, live unverified** |
 | G-04 | Browser worker resilience | Observe browser/tab disappearance, login expiry and WS reconnect without silently treating session as ready | Controlled offline tests + authorized live recovery drill | **TODO** |
 | G-05 | API error contract | Explicit timeout, 401, 429, 502, 503, cancellation, no duplicate UI submissions | Regression tests for all cases; safe log output | **IN PROGRESS** |
 | G-06 | Model/effort UI selection | Verified DOM selectors and explicit confirmation for each supported model/effort | Two controlled model/effort live sends + HTTP request verification | **TODO** |
@@ -68,6 +68,16 @@ Without restarting the healthy gateway or exposing secrets, use the UTF-8 PowerS
 - Request B: `What exact word did I ask you to say in my immediately previous message? Answer with that word only.`
 
 Observe whether the second answer contains context from the previous request; also observe whether the visible UI remains in the same chat. If A returns `ALPHA` and B returns a context-dependent value, the browser may be reusing chat state. **This is only a diagnostic; model behavior is probabilistic and cannot prove context isolation by itself.** A stronger future test should observe actual conversation IDs from safe in-memory events.
+
+After updating the repo and restarting the local gateway (needed for this NEW endpoint), use:
+
+```powershell
+$env:CLICKUP_GATEWAY_API_KEY = (Get-Content -Raw .local\gateway.key).Trim()
+$headers = @{ Authorization = "Bearer $env:CLICKUP_GATEWAY_API_KEY" }
+Invoke-RestMethod -Uri "http://127.0.0.1:8787/v1/session/diagnostics" -Headers $headers
+```
+
+The response has only `completed_replies`, `same_conversation_pairs`, `different_conversation_pairs`, and `last_relation` (`first`, `same`, `different`, `unknown`, `unobserved`). **No IDs leave the process.** The first reply is `first`; after a second successful reply the relation to the previous one becomes `same` or `different` when both IDs are available. **This classifies WS conversation IDs, not whether the model actually remembered prior content.**
 
 Before enabling multi-user or cloud deployment, convert conversation state into an explicit API contract: either new chat per request or a validated `conversation_id` bound to a single identity. Do not market the present one-user-message facade as a stateless OpenAI API.
 
