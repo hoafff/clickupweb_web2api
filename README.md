@@ -500,7 +500,7 @@ Tool sẽ dừng **trước khi gửi request** nếu hai file key vẫn trùng 
 
 **User-confirmed 2026-10-28:** after installing a separately issued 9Router client key, the actual `tools/check_9router_path.py` request through `127.0.0.1:20128` returned `9Router -> Brain Gateway -> ClickUp: PASS` and `Reply preview: OK` (3 characters). This proves the **basic JSON path** `9Router → Brain Gateway → signed-in Playwright → ClickUp Brain² → HTTP JSON` for a short prompt.
 
-**Still unverified through 9Router:** `stream=true`, multi-message transcript, long-answer completeness, native tool calling, robust session recovery or cloud operation. These should not be described as production-ready or Codex/Claude Code replacements. Gateway port 8787 has independently passed buffered SSE/history/isolated-chat tests.
+**Live 9Router route verified:** JSON, buffered `stream=true` SSE, multi-message transcript-as-text and a 606-character response (threshold-only). Still **unverified:** true generation-complete signalling, native tool calling, robust session recovery or cloud operation. These should not be described as production-ready or Codex/Claude Code replacements. Gateway port 8787 has independently passed buffered SSE/history/isolated-chat tests.
 
 The 9Router smoke client now supports additional **opt-in** test flags, tested against mock HTTP in Windows/Linux CI. On PowerShell 2, **keep both 9Router and the `--router-mode` Gateway running**, then:
 
@@ -513,3 +513,26 @@ git pull
 ```
 
 Each request sends real ClickUp traffic; `--min-reply-chars` is a heuristic, **not** proof of true answer completion. More evidence, boundaries and next work: [docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md](docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md). Keep `.local/ninerouter.key` (9Router caller) and `.local/gateway.key` (Gateway upstream) distinct and private.
+
+
+## 9Router extended live acceptance — SSE, history and long response PASSED
+
+**Verified user terminal results (2026-10-28):**
+
+| Test through 9Router :20128 | Outcome |
+|---|---|
+| `check_9router_path.py --stream` | `PASS`, SSE buffered, `OK`, 3 characters |
+| `check_9router_path.py --history` | `PASS`, JSON `ALPHA`, 6 characters |
+| Long prompt, `--min-reply-chars 200` | `PASS`, 606-character response |
+
+The third test checks response **length**, not that the final sentence finished. Source audit confirms `chatCommentCreated` is a reply-created event, NOT a proven model-completion marker. SSE `[DONE]` is the HTTP wrapper's buffered end, not actual upstream generation completion. `finish_reason=null` remains intentional.
+
+**New optional client-side end-marker test:** `check_9router_path.py --expect-suffix END_BRAIN_TEST` compares the end of the actual returned reply with an explicit test sentinel in the prompt. A match is stronger end-to-end transport evidence but still does not prove a terminal model event. After `git pull`, keep 9Router and Gateway running (no restart required):
+
+```powershell
+.\.venv\Scripts\python.exe tools\check_9router_path.py --prompt "Write five sentences explaining HTTP and WebSocket. At the very end write END_BRAIN_TEST and nothing after it." --min-reply-chars 200 --expect-suffix END_BRAIN_TEST
+```
+
+The new request may consume upstream allowance. See [live acceptance and remaining completion research](docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md).
+
+**Next engineering gates:** independently verify an actual UI/WS generation-complete signal, controlled browser recovery/re-login, then test genuine function/tool calls before treating this as a coding-agent backend. Current local-only text gateway is operational, but not production/cloud ready.
