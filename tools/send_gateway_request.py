@@ -49,6 +49,7 @@ HTTP_DIAGNOSTIC_FIELDS = (
     "http_chat_429",
     "http_chat_502",
     "http_chat_503",
+    "http_chat_rejected_compiled_transcript_too_long",
     "http_chat_rejected_message_too_long",
     "http_chat_rejected_unsupported_tool_calling",
     "http_chat_rejected_unsupported_non_text_messages",
