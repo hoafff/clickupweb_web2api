@@ -159,15 +159,19 @@ class PythonGatewayClientTests(unittest.TestCase):
             "different_conversation_pairs": 3, "last_relation": "different",
             "http_chat_received": 5, "http_chat_2xx": 4,
             "http_chat_401": 0, "http_chat_other_errors": 1,
+            "http_chat_422": 0, "http_chat_429": 1,
+            "http_chat_502": 0, "http_chat_503": 0,
             "secret_workspace": SECRET, "authorization": SECRET,
             "conversation_id": SECRET,
         }
         report = safe_diagnostics(source)
         self.assertEqual(report["http_chat_received"], 5)
         self.assertEqual(report["http_chat_other_errors"], 1)
+        self.assertEqual(report["http_chat_429"], 1)
+        self.assertEqual(report["http_chat_502"], 0)
         self.assertNotIn(SECRET, json.dumps(report))
         self.assertNotIn("secret_workspace", json.dumps(report))
-        self.assertEqual(len(report), 8)
+        self.assertEqual(len(report), 12)
         for bad in (-1, True, "4", SECRET):
             with self.subTest(bad=str(bad)[:12]):
                 with self.assertRaises(LocalClientError):
