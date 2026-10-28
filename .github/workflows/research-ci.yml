@@ -29,3 +29,7 @@ jobs:
         run: python -m compileall -q tools tests
       - name: Offline unit tests
         run: python -m unittest discover -s tests -v
+      - name: Windows PowerShell UTF-8 request smoke test
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\tests\test_send_gateway_request.ps1
