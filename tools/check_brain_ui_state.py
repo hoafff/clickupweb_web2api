@@ -28,7 +28,8 @@ if __package__ in (None, ""):
 
 from tools.brain_ui_state_probe import sanitize_ui_snapshot, BOOLEAN_FIELDS, COUNT_FIELDS
 from tools.check_9router_path import (
-    MODEL, KEY_FILE as ROUTER_KEYFILE, read_key, chat_once, RouterPathError,
+    MODEL, KEY_FILE as ROUTER_KEYFILE, read_key, chat_once,
+    reject_reused_upstream_key, RouterPathError,
 )
 from tools.send_gateway_request import DEFAULT_KEY_FILE, load_key, LocalClientError
 
@@ -164,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
                 "9Router caller key missing; create it in 9Router dashboard "
                 "and store in .local/ninerouter.key."
             )
+        # Never send using the upstream Gateway key as the inbound 9Router key.
+        reject_reused_upstream_key(router_key)
         stop = threading.Event()
         outcome: dict = {}
         def watcher():
