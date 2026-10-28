@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from tools.prompt_limits import MAX_PROMPT_CHARS
+
 REASON_OVERSIZE = "message_too_long"
 REASON_TOOLS = "unsupported_tool_calling"
 REASON_NON_TEXT = "unsupported_non_text_messages"
@@ -80,9 +82,9 @@ def safe_validation_body(reason: str) -> dict:
                 "type": "string_too_long",
                 "loc": ["body", "messages", "content"],
                 "msg": (
-                    "Gateway text-chat limit: each message content and "
-                    "the compiled transcript must fit 8000 characters. "
-                    "Coding-agent system prompts can exceed this limit."
+                    f"Gateway experimental text-chat limit: each message content "
+                    f"and the compiled transcript must fit {MAX_PROMPT_CHARS} "
+                    "characters. Coding-agent system prompts can exceed this limit."
                 ),
             }],
             "error": {
