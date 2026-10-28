@@ -143,6 +143,45 @@ class RouterPathTests(unittest.TestCase):
         self.assertIs(req["body"]["stream"], True)
         self.assertEqual(req["accept"], "text/event-stream")
 
+    def test_history_roundtrip_and_custom_unicode_prompt(self):
+        result = self.run_cli("--history")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.server.requests), 1)
+        history = self.server.requests[-1]["body"]["messages"]
+        self.assertEqual([m["role"] for m in history], [
+            "system", "user", "assistant", "user",
+        ])
+        self.assertEqual(history[-1]["content"].startswith("What word"), True)
+        self.server.requests.clear()
+        result = self.run_cli("--prompt", "Trả lời bằng OK")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.server.requests[-1]["body"]["messages"][0]["content"],
+            "Trả lời bằng OK",
+        )
+
+    def test_min_reply_length_detects_short_result(self):
+        result = self.run_cli(
+            "--prompt", "Write 3 sentences.",
+            "--min-reply-chars", "100",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("shorter than the requested", result.stderr)
+        self.assertNotIn(KEY, result.stdout + result.stderr)
+        # Request reached router; rejecting short output is only a client
+        # acceptance failure, not a transport or authentication failure.
+        self.assertEqual(len(self.server.requests), 1)
+        self.assertEqual(
+            self.server.requests[-1]["body"]["messages"][0]["content"],
+            "Write 3 sentences.",
+        )
+
+    def test_rejects_invalid_prompt_before_chat_dispatch(self):
+        result = self.run_cli("--prompt", " " * 3)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("1..7600", result.stderr)
+        self.assertEqual(self.server.requests, [])
+
     def test_missing_or_wrong_key_does_not_echo_server_body(self):
         self.keyfile.unlink()
         unauth = self.run_cli()
