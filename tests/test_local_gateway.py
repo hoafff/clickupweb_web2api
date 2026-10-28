@@ -69,6 +69,37 @@ class GatewayHTTPTests(unittest.TestCase):
         self.assertEqual(self.engine.calls, ["Reply OK"])
         self.assertTrue(data["id"].startswith("chatcmpl-local-"))
 
+    def test_explicit_utf8_json_body_with_vietnamese(self):
+        # Simulate PowerShell using [Text.Encoding]::UTF8.GetBytes($body).
+        message = "Trả lời đúng một từ: OK"
+        raw = json.dumps({
+            **VALID,
+            "messages": [{"role": "user", "content": message}],
+        }, ensure_ascii=False).encode("utf-8")
+        response = self.client.post(
+            "/v1/chat/completions",
+            headers={**AUTH, "Content-Type": "application/json; charset=utf-8"},
+            content=raw,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.engine.calls, [message])
+
+    def test_non_utf8_json_body_rejected_before_browser_send(self):
+        # A legacy client might send an 8-bit codepage body despite JSON
+        # Content-Type; the server must never submit a corrupted prompt.
+        message = "Xin chào"
+        raw = json.dumps({
+            **VALID,
+            "messages": [{"role": "user", "content": message}],
+        }, ensure_ascii=False).encode("cp1252")
+        response = self.client.post(
+            "/v1/chat/completions",
+            headers={**AUTH, "Content-Type": "application/json; charset=utf-8"},
+            content=raw,
+        )
+        self.assertNotEqual(response.status_code, 200)
+        self.assertEqual(self.engine.calls, [])
+
     def test_bearer_required_and_wrong_key_does_not_send(self):
         self.assertEqual(
             self.client.post("/v1/chat/completions", json=VALID).status_code, 401
