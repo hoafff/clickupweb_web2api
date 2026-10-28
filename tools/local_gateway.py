@@ -28,7 +28,7 @@ if __package__ in (None, ""):
     if str(_root) not in sys.path:
         sys.path.insert(0, str(_root))
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from playwright.async_api import Error as PlaywrightError, async_playwright
@@ -111,6 +111,37 @@ def create_app(
         TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"]
     )
     lease = ExclusiveSessionLease() if require_session else None
+    # Count only HTTP POST /v1/chat/completions status codes. Never store
+    # Authorization, request/response bodies, prompts, models, or opaque IDs.
+    http_counts = {
+        "http_chat_received": 0,
+        "http_chat_2xx": 0,
+        "http_chat_401": 0,
+        "http_chat_other_errors": 0,
+    }
+
+    @app.middleware("http")
+    async def count_chat_requests(request: Request, call_next):
+        track = (
+            request.method == "POST"
+            and request.url.path == "/v1/chat/completions"
+        )
+        if track:
+            http_counts["http_chat_received"] += 1
+        try:
+            response = await call_next(request)
+        except Exception:
+            if track:
+                http_counts["http_chat_other_errors"] += 1
+            raise
+        if track:
+            if 200 <= response.status_code < 300:
+                http_counts["http_chat_2xx"] += 1
+            elif response.status_code == 401:
+                http_counts["http_chat_401"] += 1
+            elif response.status_code >= 400:
+                http_counts["http_chat_other_errors"] += 1
+        return response
 
     def require_api_key(authorization: str | None = Header(default=None)) -> None:
         prefix = "Bearer "
@@ -184,7 +215,7 @@ def create_app(
     ])
     def session_diagnostics() -> dict:
         # No workspace/conversation/AI result identifiers leave the process.
-        return engine.session_diagnostics()
+        return {**engine.session_diagnostics(), **http_counts}
 
     async def run_one_prompt(text: str) -> str:
         if not engine.is_ready():
