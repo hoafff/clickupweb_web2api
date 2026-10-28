@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import socket
 import sys
@@ -24,6 +25,7 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_KEY_FILE = PROJECT_ROOT / ".local" / "gateway.key"
+DEFAULT_SESSION_FILE = PROJECT_ROOT / ".local" / "browser-owner.key"
 DEFAULT_PROMPT = "Reply with exactly one word: OK"
 MODEL_ID = "clickup-ui-current"
 MAX_PROMPT_CHARS = 8_000
@@ -54,6 +56,34 @@ def load_key(path: Path) -> str:
     return key
 
 
+def load_session_token(path: Path) -> str:
+    token = load_key(path)
+    if len(token) < 32:
+        raise LocalClientError("Browser owner session token has invalid length.")
+    return token
+
+
+def write_session_token_once(path: Path, token: str) -> None:
+    if len(token) < 32 or not token.isascii():
+        raise LocalClientError("Gateway returned an invalid owner token.")
+    if path.resolve().parent != (PROJECT_ROOT / ".local").resolve():
+        raise LocalClientError("Owner session token must stay in repository .local directory.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise LocalClientError(
+            "Owner token file exists. Do not replace it without restarting the gateway."
+        ) from exc
+    except OSError as exc:
+        raise LocalClientError("Unable to create local owner token file.") from exc
+    try:
+        with os.fdopen(fd, "w", encoding="ascii") as file:
+            file.write(token + "\n")
+    except OSError as exc:
+        raise LocalClientError("Unable to write local owner token file.") from exc
+
+
 def encode_request(prompt: str) -> bytes:
     if not prompt.strip() or len(prompt) > MAX_PROMPT_CHARS:
         raise LocalClientError("Prompt must contain 1..8000 non-blank characters.")
@@ -74,15 +104,18 @@ def request_json(
     path: str,
     body: bytes | None = None,
     timeout: float = 180.0,
+    session_token: str | None = None,
 ) -> dict[str, Any]:
     if not 1024 <= port <= 65535:
         raise LocalClientError("Port must be 1024..65535.")
     if not 1 <= timeout <= 600:
         raise LocalClientError("Timeout must be between 1 and 600 seconds.")
-    if path not in {"/v1/chat/completions", "/v1/session/diagnostics"}:
+    if path not in {
+        "/v1/chat/completions", "/v1/session/diagnostics", "/v1/session/claim",
+    }:
         raise LocalClientError("Unsupported gateway path.")
     if body is not None and path != "/v1/chat/completions":
-        raise LocalClientError("Unexpected body for diagnostics.")
+        raise LocalClientError("Unexpected body for a session operation.")
     if body is None and path == "/v1/chat/completions":
         raise LocalClientError("A JSON request body is required.")
 
@@ -90,10 +123,14 @@ def request_json(
     headers = {"Authorization": f"Bearer {key}"}
     if body is not None:
         headers["Content-Type"] = "application/json; charset=utf-8"
+    if session_token is not None:
+        if path == "/v1/session/claim":
+            raise LocalClientError("Cannot pass owner token when claiming a session.")
+        headers["X-ClickUp-Session"] = session_token
 
     request = urllib.request.Request(
         url, data=body, headers=headers,
-        method="POST" if body is not None else "GET",
+        method="POST" if body is not None or path == "/v1/session/claim" else "GET",
     )
     # Never allow HTTP_PROXY/HTTPS_PROXY to redirect loopback traffic.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -149,16 +186,45 @@ def main(argv: list[str] | None = None) -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--prompt", help="One user message; never logged by client")
     group.add_argument("--diagnostics", action="store_true", help="Print safe session comparison")
+    group.add_argument(
+        "--claim-session", action="store_true",
+        help="Claim one exclusive browser owner token (strict gateway only)",
+    )
     parser.add_argument("--key-file", type=Path, default=DEFAULT_KEY_FILE)
+    parser.add_argument(
+        "--session-file", type=Path, default=None,
+        help="Secret owner token file (recommended: .local/browser-owner.key)",
+    )
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--timeout", type=float, default=180)
     args = parser.parse_args(argv)
     try:
         key = load_key(args.key_file)
+        if args.claim_session:
+            target = args.session_file or DEFAULT_SESSION_FILE
+            if target.exists():
+                raise LocalClientError(
+                    "Owner token file already exists; don't reclaim until gateway restart."
+                )
+            response = request_json(
+                port=args.port, key=key, path="/v1/session/claim",
+                timeout=args.timeout,
+            )
+            token = response.get("session_token")
+            if not isinstance(token, str):
+                raise LocalClientError("Gateway did not return a valid owner token.")
+            write_session_token_once(target, token)
+            print("Claimed one exclusive browser API session (token stored privately).")
+            return 0
+        session_token = None
+        if args.session_file is not None:
+            session_token = load_session_token(args.session_file)
+        elif DEFAULT_SESSION_FILE.exists():
+            session_token = load_session_token(DEFAULT_SESSION_FILE)
         if args.diagnostics:
             result = request_json(
                 port=args.port, key=key, path="/v1/session/diagnostics",
-                timeout=args.timeout,
+                timeout=args.timeout, session_token=session_token,
             )
             print(json.dumps(safe_diagnostics(result), indent=2))
         else:
@@ -166,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
             result = request_json(
                 port=args.port, key=key, path="/v1/chat/completions",
                 body=encode_request(prompt), timeout=args.timeout,
+                session_token=session_token,
             )
             print(get_answer(result))
     except LocalClientError as exc:
