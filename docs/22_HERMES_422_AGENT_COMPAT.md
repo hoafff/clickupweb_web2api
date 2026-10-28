@@ -73,3 +73,11 @@ No new prompts are required to prove code initialization. The reason counters be
 ## Remaining issues
 
 The observed `string_too_long` identifies at least one incompatible request to the provider, but **the exact offending field index/length is not visible** in the cropped 9Router connection row. An additional oversized compiled transcript or unsupported tools error could follow when the first one is resolved. Do not assume a short user-visible greeting means the whole request is short. The fix in this chapter clarifies and protects failure handling; full Hermes agent interoperability remains unimplemented.
+
+## Addendum (2026-10-28): editor can paste ~40k; local text guard raised to 50k
+
+**The 8k figures above describe the version that caused the original Hermes 422, not the current GitHub HEAD.** The researcher subsequently pasted about 40,000 characters into the visible ClickUp Brain editor successfully (a *draft*, not proven server acceptance). We then consolidated the text-only Gateway budget at **50,000 Unicode characters** across per-message validation, flattened transcript, and CLI clients; see [docs/23_LARGE_PROMPT_CAPACITY.md](23_LARGE_PROMPT_CAPACITY.md).
+
+The new 50k guard is an engineering **policy**, not an upstream documented capacity. It can clear an old `string_too_long` for a 40k message in our local schema but **does not** validate Playwright long input, ClickUp server processing or actual model context. The 422 sanitizer remains active and still rejects unsupported tools/non-text/request options. Historical advice to keep the old 8k cap without evidence is superseded by the new operator observation and bounded local change, but the no-silent-truncation and no-fake-tool-calling principles remain mandatory.
+
+Do **not** interpret this update as a claim that Hermes agents can execute tools over a text-only ClickUp UI bridge.
