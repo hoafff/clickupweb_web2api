@@ -223,6 +223,92 @@ class GatewayHTTPTests(unittest.TestCase):
         self.assertFalse(validate_clickup_app_url("https://user:pw@app.clickup.com/"))
 
 
+class GatewayExclusiveSessionTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = FakeEngine()
+        self.client = TestClient(
+            create_app(self.engine, api_key=KEY, require_session=True),
+            base_url="http://127.0.0.1:8787",
+        )
+        self.addCleanup(self.client.close)
+
+    def test_claim_once_then_sticky_multiturn_only_for_owner(self):
+        before = self.client.post("/v1/chat/completions", headers=AUTH, json=VALID)
+        self.assertEqual(before.status_code, 409)
+        self.assertEqual(self.engine.calls, [])
+        self.assertEqual(
+            self.client.post("/v1/session/claim").status_code, 401
+        )
+
+        first = self.client.post("/v1/session/claim", headers=AUTH)
+        self.assertEqual(first.status_code, 200, first.text)
+        lease_token = first.json()["session_token"]
+        self.assertGreater(len(lease_token), 30)
+        self.assertEqual(
+            self.client.post("/v1/session/claim", headers=AUTH).status_code,
+            409,
+        )
+
+        unauthorized = self.client.post(
+            "/v1/chat/completions", headers=AUTH, json=VALID
+        )
+        self.assertEqual(unauthorized.status_code, 403)
+        wrong_token = self.client.post(
+            "/v1/chat/completions", headers={
+                **AUTH, "X-ClickUp-Session": "someone-else"
+            }, json=VALID
+        )
+        self.assertEqual(wrong_token.status_code, 403)
+        self.assertEqual(self.engine.calls, [])
+        self.assertNotIn(lease_token, wrong_token.text)
+        self.assertNotIn(lease_token, unauthorized.text)
+
+        owner = {**AUTH, "X-ClickUp-Session": lease_token}
+        response_a = self.client.post(
+            "/v1/chat/completions", headers=owner, json=VALID
+        )
+        response_b = self.client.post(
+            "/v1/chat/completions", headers=owner, json=VALID
+        )
+        self.assertEqual(response_a.status_code, 200)
+        self.assertEqual(response_b.status_code, 200)
+        self.assertEqual(self.engine.calls, ["Reply OK", "Reply OK"])
+        self.assertEqual(
+            self.client.get("/v1/session/diagnostics", headers=AUTH).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.get("/v1/session/diagnostics", headers=owner).status_code,
+            200,
+        )
+        self.assertNotIn(lease_token, response_a.text + response_b.text)
+
+    def test_lease_requires_browser_ready_and_is_not_issued_prematurely(self):
+        self.engine.ready = False
+        self.assertEqual(
+            self.client.post("/v1/session/claim", headers=AUTH).status_code, 503
+        )
+        self.engine.ready = True
+        claim = self.client.post("/v1/session/claim", headers=AUTH)
+        self.assertEqual(claim.status_code, 200)
+
+    def test_claim_disabled_when_legacy_api_used(self):
+        legacy = TestClient(
+            create_app(self.engine, api_key=KEY, require_session=False),
+            base_url="http://127.0.0.1:8787",
+        )
+        try:
+            self.assertEqual(
+                legacy.post("/v1/session/claim", headers=AUTH).status_code, 409
+            )
+            self.assertEqual(
+                legacy.post("/v1/chat/completions", headers=AUTH, json=VALID).status_code,
+                200,
+            )
+        finally:
+            legacy.close()
+
+
 def start_event(result_id: str, conversation_id: str) -> str:
     return json.dumps({"event": {
         "name": "aiConversationStarted",
@@ -304,6 +390,35 @@ class BrowserEngineIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["last_relation"], "different")
         self.assertNotIn("first-private-conversation", str(diagnostics))
         self.assertNotIn("second-private-conversation", str(diagnostics))
+
+    async def test_strict_browser_continuity_aborts_unexpected_switch(self):
+        self.engine.strict_conversation = True
+        ids = iter([("first-ai", "private-conv-a"),
+                    ("second-ai", "private-conv-b")])
+
+        async def fake_send(page, prompt, composer_css, send_css):
+            aid, cid = next(ids)
+            self.engine.bridge.on_frame(start_event(aid, cid))
+            self.engine.bridge.on_frame(comment_event(aid, cid, "OK"))
+
+        with patch("tools.local_gateway._send_via_ui", side_effect=fake_send):
+            self.assertEqual(await self.engine.complete("first"), "OK")
+            with self.assertRaises(GatewaySendError):
+                await self.engine.complete("second")
+        self.assertFalse(self.engine.is_ready())
+        self.assertEqual(self.engine.session_diagnostics()["completed_replies"], 1)
+        self.assertEqual(self.engine.session_diagnostics()["different_conversation_pairs"], 0)
+
+    async def test_strict_browser_requires_conversation_id(self):
+        self.engine.strict_conversation = True
+        async def fake_send(page, prompt, composer_css, send_css):
+            self.engine.bridge.on_frame(start_event("aid", ""))
+            self.engine.bridge.on_frame(comment_event("aid", "", "OK"))
+        with patch("tools.local_gateway._send_via_ui", side_effect=fake_send):
+            with self.assertRaises(GatewaySendError):
+                await self.engine.complete("first")
+        self.assertFalse(self.engine.is_ready())
+
 
     async def test_failed_send_marks_session_degraded_to_prevent_duplicate(self):
         async def fake_failure(page, prompt, composer_css, send_css):
