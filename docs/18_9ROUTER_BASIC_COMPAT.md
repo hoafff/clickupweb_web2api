@@ -234,3 +234,16 @@ Expected if successfully configured: `brain/clickup-ui-current` advertised in 9R
 Current 9Router public documentation uses local `/v1` on port `20128`, and 9Router custom OpenAI-compatible providers generally use prefixed model IDs, such as `brain/clickup-ui-current`. Some releases or configurations default missing `stream` to true, so `check_9router_path.py` always supplies **explicit `stream: false`** for JSON and `stream: true` for SSE, with a matching `Accept` header. This addresses a known interoperability issue but does not establish 9Router tool-calling support.
 
 Reference: https://docs.9router.com/ and https://github.com/decolua/9router ; see issues #1260 and #4122 for stream default behavior. Actual provider UI field labels and authentication vary by installed version.
+
+
+### Security preflight for local 9Router
+
+Check the 9Router version before wiring in a Browser worker:
+
+```powershell
+npm list -g 9router --depth=0
+```
+
+Historically some 9Router versions had localhost-authentication bypass issues (GHSA-86m2-fcxq-5q7c / CVE-2026-55641 and GHSA-5mj8-gf6m-fhw8 / CVE-2026-56681). Public advisories report fixes in recent releases; **do not assume the installed copy is patched without checking**. Restrict both processes to loopback, do not expose 20128 or 8787 on the LAN/public Internet, and maintain separate secrets for 9Router and the Brain Gateway. Relevant public advisories: https://github.com/advisories/GHSA-86m2-fcxq-5q7c and https://github.com/advisories/GHSA-5mj8-gf6m-fhw8.
+
+If running the CLI version of 9Router with an appropriate flag, prefer `9router --host 127.0.0.1` after checking the installed version's help. Do **not** change a functioning service's bind setting or upgrade npm mid-test without first securing its local dashboard configuration and reviewing the runtime.
