@@ -3,7 +3,8 @@
 # Start local_gateway.py in a different terminal before running.
 [CmdletBinding()]
 param(
-    [string]$Prompt = 'Trả lời đúng một từ: OK',
+    # Keep the script source ASCII-compatible for Windows PowerShell 5.1 (no BOM).
+    [string]$Prompt = 'Reply with exactly one word: OK',
     [ValidateRange(1024, 65535)]
     [int]$Port = 8787,
     [string]$KeyFile = ''
