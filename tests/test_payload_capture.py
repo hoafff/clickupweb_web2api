@@ -36,6 +36,21 @@ class PayloadRedactionTests(unittest.TestCase):
         self.assertEqual(sanitized["accessToken"], "<redacted>")
         self.assertEqual(sanitized["config"]["max_tokens"], 2048)
 
+    def test_analytics_writekey_and_session_id_are_redacted(self):
+        captured = {
+            "writeKey": "private-key-value",
+            "sessionId": "private-session-id",
+            "session_id": "private-session-id-2",
+            "aiSessionId": "private-ai-session-id",
+            "reasoningLevel": "medium",
+        }
+        sanitized = redact_payload(captured)
+        self.assertEqual(sanitized["writeKey"], "<redacted>")
+        self.assertEqual(sanitized["sessionId"], "<redacted>")
+        self.assertEqual(sanitized["session_id"], "<redacted>")
+        self.assertEqual(sanitized["aiSessionId"], "<redacted>")
+        self.assertEqual(sanitized["reasoningLevel"], "medium")
+
     def test_bearer_jwt_and_api_keys_masked_within_string(self):
         data = {
             "message": (
