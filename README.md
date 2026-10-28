@@ -67,7 +67,8 @@ Trình duyệt mở ở chế độ nhìn thấy được. Đăng nhập bằng 
 - [x] Chạy tracer với phiên ClickUp được cấp quyền, thu bằng chứng đã redacted (V3).
 - [x] Xác minh HTTP chat command, selectedModel/selectedReasoningLevel và WS reply-created event trên V3; **chưa xác minh full inference/streaming transport**.
 - [x] Xây và kiểm thử offline conversation correlator; **chưa có browser/protocol adapter gửi prompt**.
-- [ ] Triển khai adapter gửi prompt và nhận response end-to-end trong phiên nghiên cứu được cấp quyền.
+- [x] Triển khai Browser Adapter prototype (manual + opt-in CSS send), kiểm thử offline bằng fake WS/UI.
+- [ ] Kiểm thử live Browser Adapter gửi và nhận qua ClickUp Brain UI trên phiên đăng nhập được ủy quyền.
 - [ ] Demo OpenAI-compatible JSON/SSE, kiểm thử multi-model, quota và tính ổn định.
 
 ## Nguồn
@@ -178,3 +179,17 @@ git pull
 ```
 
 CI chạy **subprocess thực tế** để kiểm thử cả direct-script và `-m` mode trên một trace giả, không cần truy cập ClickUp. Kết quả `matched=8` trên dữ liệu riêng của người dùng vẫn chỉ được xác nhận sau khi người dùng chạy lệnh với file V3 local.
+
+
+## Browser Adapter — manual E2E smoke test (prototype)
+
+[Hướng dẫn thao tác, trạng thái test và giới hạn](docs/13_BROWSER_ADAPTER_E2E.md). Chạy từ repo root trên Windows, sau khi **đóng trình duyệt/tracer cũ** để không khóa profile:
+
+```powershell
+git pull
+.\.venv\Scripts\python.exe tools\browser_adapter.py --mode manual --timeout 120
+```
+
+Khi Chromium mở: đăng nhập/mở Brain², chọn model, bảo đảm không còn câu trả lời đang chạy. Quay lại PowerShell nhấn ENTER để **arm**. Sau đó gửi **đúng một** tin trong Browser. Adapter lắng nghe `/ws`, ghép `aiConversationStarted` → `chatCommentCreated`, in độ dài văn bản, không in prompt hoặc trả lời. Thêm `--show-reply` nếu muốn hiển thị nội dung trả lời riêng trên console.
+
+`--mode auto --confirm-send --composer-selector ... --send-selector ...` cũng đã có nhưng **chưa kiểm thử DOM thật**; chỉ sử dụng khi tự xác minh CSS selector trên Browser. Không suy diễn selector từ ảnh hoặc trace network. CI chỉ kiểm thử offline mock trên Ubuntu/Windows; **live E2E, API gateway và server-side model execution chưa được xác minh**.
