@@ -37,6 +37,7 @@ from tools.conversation_correlator import (
     ConversationEventCorrelator,
     CorrelatedComment,
 )
+from tools.inspect_brain_ui import select_brain_page
 from playwright.async_api import Error as PlaywrightError, Page, WebSocket, async_playwright
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -298,6 +299,10 @@ async def run(args: argparse.Namespace) -> int:
             print("Browser profile stays PRIVATE; log in and open ClickUp Brain.")
             print("Use only ONE Brain tab and finish prior AI generations first.")
             await _input("When the target chat is ready, press ENTER here to arm: ")
+            try:
+                page = select_brain_page(context.pages)
+            except ValueError as exc:
+                raise BrowserAdapterError(str(exc)) from exc
             if page.is_closed():
                 raise BrowserAdapterError("Selected browser tab was closed.")
 
