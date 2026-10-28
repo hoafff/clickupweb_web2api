@@ -68,7 +68,7 @@ class ValidationSafetyTests(unittest.TestCase):
         ).json()
 
     def test_hermes_long_system_message_rejected_without_echo(self):
-        private_prompt = PRIVATE + "_" + ("x" * 8100)
+        private_prompt = PRIVATE + "_" + ("x" * 50200)
         response = self.post(content="hello", messages=[
             {"role": "system", "content": private_prompt},
             {"role": "user", "content": "hello"},
@@ -125,7 +125,7 @@ class ValidationSafetyTests(unittest.TestCase):
         self.assertEqual(other.json()["error"]["code"], REASON_OTHER)
         self.assertNotIn(PRIVATE, other.text)
         big = self.post(content="hello", messages=[
-            {"role": "system", "content": PRIVATE + "x" * 7800},
+            {"role": "system", "content": PRIVATE + "x" * 49900},
             {"role": "user", "content": "Hello"},
         ])
         self.assertEqual(big.status_code, 422)
@@ -139,6 +139,20 @@ class ValidationSafetyTests(unittest.TestCase):
             counters["http_chat_rejected_message_too_long"], 0,
         )
         self.assertEqual(self.engine.calls, [])
+
+    def test_40k_agent_system_transcript_now_validates_as_plain_text(self):
+        # Passing validation does NOT imply Hermes tool-calling support.
+        long_system = PRIVATE + ("b" * 39900)
+        r = self.post(content="xin chào", messages=[
+            {"role": "system", "content": long_system},
+            {"role": "user", "content": "xin chào"},
+        ])
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(self.engine.calls), 1)
+        compiled = self.engine.calls[0]
+        self.assertIn(PRIVATE, compiled)
+        self.assertIn('"role":"system"', compiled)
+        self.assertGreater(len(compiled), len(long_system))
 
     def test_plain_chat_still_returns_reply_and_no_422(self):
         result = self.post(content="Hi!")
@@ -154,9 +168,9 @@ class ValidationSafetyTests(unittest.TestCase):
         errors = [{
             "type": "string_too_long",
             "loc": ("body", "messages", 0, "content"),
-            "input": PRIVATE + "x" * 8200,
+            "input": PRIVATE + "x" * 50200,
             "msg": PRIVATE,
-            "ctx": {"max_length": 8000},
+            "ctx": {"max_length": 50000},
         }]
         self.assertEqual(reason_from_errors(errors), REASON_OVERSIZE)
         strange = [{
