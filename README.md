@@ -116,3 +116,21 @@ Nhập marker trong **PowerShell** trước khi thao tác trên UI, rồi mới 
 ```
 
 `brain_v3_meta.jsonl` chứa metadata, `brain_v3_private_content.jsonl` chứa nội dung JSON HTTP/WS/SSE **có redaction theo key**, từ lúc marker đầu tiên. Chỉ capture nội dung JSON text nhỏ hơn giới hạn mặc định 192 KiB/response; không capture file binary/HTML/raw HAR. Bộ lọc secret **không bảo đảm loại hết thông tin nhạy cảm**, đặc biệt các giá trị không có tên trường rõ ràng: giữ file private trên máy, xem lại trước khi chia sẻ và không commit lên GitHub. Tracer không tự login hay gửi prompt.
+
+
+## Kết quả trace V3 và marker bấm lặp
+
+Xem [báo cáo V3: 8 marker, model/effort và WebSocket](docs/10_V3_TRACE_ANALYSIS_2026-10-28.md). Nếu bấm lại `mark opus_low` hoặc `mark opus_auto`, **không cần capture lại**; dùng tool mới để tách theo lần xuất hiện:
+
+```powershell
+git pull
+.\.venv\Scripts\python.exe tools\analyze_brain_trace.py artifacts\brain_v3_meta.jsonl artifacts\brain_v3_private_content.jsonl
+```
+
+Muốn xuất JSON tổng hợp **không có prompt, conversation ID, token và raw content**:
+
+```powershell
+.\.venv\Scripts\python.exe tools\analyze_brain_trace.py artifacts\brain_v3_meta.jsonl artifacts\brain_v3_private_content.jsonl --json > artifacts\brain_v3_analysis.json
+```
+
+Kết quả `brain_v3_analysis.json` chứa mỗi pha `#1 ... #8` với HTTP status, event name counts và giá trị `model/effort` đã whitelist, **không** chứa payload gốc. Bản private log V3 đã cung cấp vẫn có thể chứa session/analytics identifiers; giữ private và không commit. Tracer từ bản cập nhật đã tăng che `writeKey`, `session_id`, `sessionId`.
