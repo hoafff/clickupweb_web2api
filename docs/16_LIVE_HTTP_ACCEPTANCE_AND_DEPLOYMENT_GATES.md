@@ -81,6 +81,32 @@ The response has only `completed_replies`, `same_conversation_pairs`, `different
 
 Before enabling multi-user or cloud deployment, convert conversation state into an explicit API contract: either new chat per request or a validated `conversation_id` bound to a single identity. Do not market the present one-user-message facade as a stateless OpenAI API.
 
+## 5a. Windows PowerShell execution policy — client-side workaround
+
+A subsequent live session reported:
+
+```text
+.\tools\send_gateway_request.ps1 ... -> PSSecurityException:
+running scripts is disabled on this system
+GET /v1/session/diagnostics -> completed_replies: 0, last_relation: unobserved
+```
+
+**Analysis:** PowerShell blocked the `.ps1` files before any HTTP request. The diagnostics endpoint itself succeeded, so gateway readiness/auth was working; no successful completion had occurred in the freshly restarted process.
+
+**Implementation:** [`tools/send_gateway_request.py`](../tools/send_gateway_request.py) is a standard-library localhost HTTP client. It loads the Git-ignored key from `.local/gateway.key`, builds valid JSON with the Vietnamese prompt encoded as UTF-8 bytes, supports `--prompt` and `--diagnostics`, and never prints the key, raw request, or opaque conversation IDs. Network destination is hardcoded `127.0.0.1` with configurable port; no external URL arguments. Unit tests use a synthetic real local HTTP server and subprocess CLI, not ClickUp.
+
+From PowerShell 2 (keep PowerShell 1 running the gateway):
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --prompt "Reply with the word ALPHA only."
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --prompt "What word did I ask you to say in my previous message?"
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --diagnostics
+```
+
+The Python script needs **no PowerShell ExecutionPolicy change**, no `.ps1`, and no gateway restart to use the new client. The two-request *live* outcome remains unverified until the researcher reports the result.
+
 ## 6. Security and limitations
 
 The first HTTP E2E pass used `model=clickup-ui-current`, which means **whatever model/effort the operator chose in the UI**. No HTTP model routing, `stream=true`, file attachments, system/developer roles, token usage or guaranteed final completion are supported. The output event `chatCommentCreated` indicates comment creation, not necessarily completed long-running generation. Never expose `127.0.0.1:8787` through a public tunnel until TLS, auth, worker separation, quota and browser-session security are implemented and independently reviewed.
