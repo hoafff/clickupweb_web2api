@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 from tools.check_9router_path import (
     ROOT, RouterPathError, chat_once, classify_auth_error, main, parse_models,
-    parse_stream, read_key, request_router, save_key,
+    parse_stream, read_key, reject_reused_upstream_key, request_router, save_key,
 )
 from tools.router_compat import make_buffered_sse
 
@@ -160,6 +160,17 @@ class RouterPathTests(unittest.TestCase):
                       "stream": False},
             )
         self.assertNotIn(KEY, str(cm.exception))
+
+    def test_client_key_matching_gateway_secret_blocked_before_chat(self):
+        upstream = Path(self.tmp.name) / "gateway.key"
+        upstream.write_text(KEY + "\n", encoding="ascii")
+        with self.assertRaisesRegex(RouterPathError, "distinct authentication roles") as cm:
+            reject_reused_upstream_key(KEY, upstream)
+        self.assertNotIn(KEY, str(cm.exception))
+        self.assertEqual(self.server.requests, [])
+        reject_reused_upstream_key("real-9router-issued-client-key", upstream)
+        reject_reused_upstream_key(None, upstream)
+        reject_reused_upstream_key(KEY, upstream.with_name("absent.key"))
 
     def test_allowlisted_401_diagnostics_never_echo_secrets(self):
         examples = [
