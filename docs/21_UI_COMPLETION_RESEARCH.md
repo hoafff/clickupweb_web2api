@@ -141,3 +141,23 @@ If explicitly choosing **one more** benign research request after inspecting the
 ### Remaining limitations
 
 The Stop-like control's exact DOM semantics need independent read-only validation. The current heuristic reads only short accessibility attributes, not the label values in the result. It is not a verified final-generation event. The screenshot and counters provide **evidence for a state hypothesis**, but not evidence of API stream completion. Keep `finish_reason=null` and buffered-only SSE.
+
+### Safe HTTP counters now included in the diagnostics CLI
+
+Earlier, `local_gateway.py` counted HTTP chat arrivals/rejections but `send_gateway_request.py --diagnostics` **silently omitted those safe counters**. Fixed the CLI to include only optional nonnegative integer fields:
+
+```text
+http_chat_received
+http_chat_2xx
+http_chat_401
+http_chat_other_errors
+```
+
+The user's currently running Gateway can remain started; `git pull` updates the CLI for its next invocation. The new printed counters help distinguish:
+
+- `http_chat_received` not changing across a routed request → it never reached Gateway (9Router-side rejection/transport issue).
+- Received + `http_chat_other_errors` increasing → request reached Gateway but a non-401 failure occurred, potentially 422/429/502/503 (still need sanitized 9Router numeric status).
+- Received + `http_chat_2xx` increasing, but client reports failure → Gateway sent success and client/9Router response handling needs review.
+- Received + `http_chat_401` increasing → Gateway rejected upstream API credentials.
+
+All counters start fresh with each Gateway process. They do not contain prompt, account/workspace ID, token or returned content. An HTTP error after the UI click may still have consumed upstream resources; **do not auto-retry**.
