@@ -161,6 +161,7 @@ class PythonGatewayClientTests(unittest.TestCase):
             "http_chat_401": 0, "http_chat_other_errors": 1,
             "http_chat_422": 0, "http_chat_429": 1,
             "http_chat_502": 0, "http_chat_503": 0,
+            "http_chat_rejected_compiled_transcript_too_long": 0,
             "http_chat_rejected_message_too_long": 1,
             "http_chat_rejected_unsupported_tool_calling": 0,
             "http_chat_rejected_unsupported_non_text_messages": 0,
@@ -177,7 +178,7 @@ class PythonGatewayClientTests(unittest.TestCase):
         self.assertEqual(report["http_chat_rejected_message_too_long"], 1)
         self.assertNotIn(SECRET, json.dumps(report))
         self.assertNotIn("secret_workspace", json.dumps(report))
-        self.assertEqual(len(report), 17)
+        self.assertEqual(len(report), 18)
         for bad in (-1, True, "4", SECRET):
             with self.subTest(bad=str(bad)[:12]):
                 with self.assertRaises(LocalClientError):
