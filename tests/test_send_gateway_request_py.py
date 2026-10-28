@@ -161,6 +161,11 @@ class PythonGatewayClientTests(unittest.TestCase):
             "http_chat_401": 0, "http_chat_other_errors": 1,
             "http_chat_422": 0, "http_chat_429": 1,
             "http_chat_502": 0, "http_chat_503": 0,
+            "http_chat_rejected_message_too_long": 1,
+            "http_chat_rejected_unsupported_tool_calling": 0,
+            "http_chat_rejected_unsupported_non_text_messages": 0,
+            "http_chat_rejected_incompatible_request_format": 0,
+            "http_chat_rejected_invalid_request": 0,
             "secret_workspace": SECRET, "authorization": SECRET,
             "conversation_id": SECRET,
         }
@@ -169,13 +174,18 @@ class PythonGatewayClientTests(unittest.TestCase):
         self.assertEqual(report["http_chat_other_errors"], 1)
         self.assertEqual(report["http_chat_429"], 1)
         self.assertEqual(report["http_chat_502"], 0)
+        self.assertEqual(report["http_chat_rejected_message_too_long"], 1)
         self.assertNotIn(SECRET, json.dumps(report))
         self.assertNotIn("secret_workspace", json.dumps(report))
-        self.assertEqual(len(report), 12)
+        self.assertEqual(len(report), 17)
         for bad in (-1, True, "4", SECRET):
             with self.subTest(bad=str(bad)[:12]):
                 with self.assertRaises(LocalClientError):
                     safe_diagnostics({**source, "http_chat_2xx": bad})
+                with self.assertRaises(LocalClientError):
+                    safe_diagnostics({
+                        **source, "http_chat_rejected_message_too_long": bad,
+                    })
 
     def test_exclusive_session_client_claim_and_local_owner_file(self):
         # Test file is inside a synthetic repo .local folder; never uses
