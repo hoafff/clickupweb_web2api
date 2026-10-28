@@ -634,3 +634,21 @@ git pull
 ```
 
 Only when the browser and Gateway are healthy **and you choose to spend one more real test request**, consider `check_brain_ui_state.py --drive-router --samples 360 --interval 0.5`. That will report a safe router status/timeout category. **Do not equate Stop disappearing with an upstream generation-complete event.** See [docs/21_UI_COMPLETION_RESEARCH.md](docs/21_UI_COMPLETION_RESEARCH.md).
+
+## Post-failure ClickUp UI / 9Router diagnosis: 2 requests, 1 2xx, 1 error
+
+Actual user-provided Gateway diagnostics from the current process: `completed_replies=1`, `http_chat_received=2`, `http_chat_2xx=1`, `http_chat_401=0`, `http_chat_other_errors=1`. Read-only UI snapshot after the failed research test remains healthy: `page_is_brain=true`, `composer_visible=true`, `stop_candidate_count=0`. This confirms **one Gateway non-401 HTTP error**, not its status or cause. A failure inside the Playwright send/WS correlation normally degrades this Gateway; since the UI snapshot still works, validation `422`, concurrency `429` and other pre-send errors warrant investigation.
+
+**Implemented:** additional strictly numeric diagnostics `http_chat_422`, `http_chat_429`, `http_chat_502`, `http_chat_503`, plus offline tests, while retaining the original aggregate counters and not logging keys, prompts, error bodies or IDs. These are **future** process counters: updating the Gateway server code requires a restart, which resets counters. **They cannot reconstruct the earlier failure.** Inspect the existing 9Router request logs for a numeric HTTP status first, without sending or retrying the prompt that already appeared in ClickUp.
+
+No-credit sanity check (PowerShell 2, leave current Gateway running):
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+Invoke-RestMethod http://127.0.0.1:8787/healthz
+.\.venv\Scripts\python.exe tools\check_brain_ui_state.py --snapshot
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --diagnostics
+```
+
+The UI Stop hint is only an observation, **not** a verified final-generation signal. See [docs/21_UI_COMPLETION_RESEARCH.md](docs/21_UI_COMPLETION_RESEARCH.md). The next actionable fix depends on the actual 422/429/502/503 status, not a speculative timeout increase.
