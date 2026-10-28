@@ -583,3 +583,32 @@ git pull
 ```
 
 No browser restart or AI request. Keep the trace PRIVATE; only share the resulting counter JSON. Evidence and caveats: [docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md](docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md).
+
+
+## 2026-10-28 — Live Brain WS timeline v3 and opt-in UI completion research
+
+**Actual private trace v3 counters (shared by operator):** 176 inbound named event frames; 8 AI starts and 8 matched created AI comments; 13 `chatCommentEdited`, of which **10 were within 2 seconds after the preceding AI reply**, 3 occurred with an AI request still pending, and **all 13 had empty `version_event_data.changes`**. Other chat-prefixed events: 49, none recognized as typing/status/conversation/comment by our simple name buckets. **No verified AI generation-completed event.** Temporal proximity alone does NOT identify an edit with a specific reply.
+
+Implemented read-only `tools/brain_ui_state_probe.py`, opt-in authenticated `GET /v1/research/ui-state` (requires Gateway `--ui-research`) and `tools/check_brain_ui_state.py` for on-demand snapshot, bounded watcher, or ONE explicit benign 9Router request while watching. No chat text, raw control labels, credentials, URLs or IDs are emitted; control labels are classified locally into fixed integer counts, never treated as a verified completion marker. The proven chat route, `finish_reason=null`, and buffered SSE are **unchanged**.
+
+To try UI research: stop/restart only the local Gateway worker, close the old Chromium and keep 9Router running. Start:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+$env:CLICKUP_GATEWAY_API_KEY = (Get-Content -Raw .local\gateway.key).Trim()
+.\.venv\Scripts\python.exe tools\local_gateway.py --port 8787 --router-mode --ui-research
+```
+
+Confirm ClickUp Brain in the visible browser and press ENTER. On PowerShell 2:
+
+```powershell
+# Read-only, no AI request or allowance consumption:
+.\.venv\Scripts\python.exe tools\check_brain_ui_state.py --snapshot
+
+# Optional: explicit ONE benign test request through 9Router;
+# polls UI metadata while reply is being generated:
+.\.venv\Scripts\python.exe tools\check_brain_ui_state.py --drive-router --samples 70 --interval 0.35
+```
+
+Only share the fixed-key JSON summary. **Do not** share keys, trace JSONL, Chromium profile or private browser logs. UI Stop/Generating hints can be absent due to selectors/language, or present for unrelated controls. They do not establish a final-generation signal. Full work plan, safeguards, expected limitations: [docs/21_UI_COMPLETION_RESEARCH.md](docs/21_UI_COMPLETION_RESEARCH.md).
