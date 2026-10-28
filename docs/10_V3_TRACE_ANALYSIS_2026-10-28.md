@@ -79,7 +79,28 @@ Chi tiết: lượt bắt đầu ở `opus_low#5` lúc **05:38:25.569 UTC**, cò
 
 Dù tracer có best-effort redaction, JSON private có thể vẫn chứa **analytics writeKey, user/workspace IDs, conversation IDs, message text và metadata**. Tuyệt đối không commit file private JSONL hay gửi công khai. Bản V4 nên bổ sung redaction `writeKey`, thông tin định danh và bộ xuất báo cáo chỉ chứa key paths + các giá trị model/effort cần nghiên cứu. Cần review cả file summary trước khi public vì masked URL có thể chứa các đoạn path không ngẫu nhiên.
 
-## 6. Next priorities
+## 6. Verified chat request model and effort wire fields
+
+**Phát hiện bổ sung từ phân tích JSON request V3, khác với telemetry:** Trong body các request được phân loại là chat commands, `comment_type_data.query` là **chuỗi URL query** và có các key `selectedModel`, `selectedReasoningLevel` (tùy trường hợp), `AIToolId` (không có với Max), `shouldTriage` và `createLink`. Các key này tồn tại ngay trong request gửi tại thời điểm người dùng gửi chat; không cần suy diễn từ `POST /v1/t` analytics.
+
+| Pha | HTTP chat command | selectedModel | selectedReasoningLevel |
+|---|---|---|---|
+| #1 max_first | view | `auto` | omitted |
+| #2 max_followup | comment | `auto` | omitted |
+| #3 opus_switch | comment, failed + retry 201 | `claude-opus-5-5` | `medium` ở cả 2 requests |
+| #4 opus_auto lần 1 | view | `claude-opus-5-5` | `medium` — marker label sai so với request |
+| #5 opus_low lần 1 | view | `claude-opus-5-5` | `low` |
+| #6 opus_low lần 2 | view | `claude-opus-5-5` | `low` |
+| #7 opus_medium | view | `claude-opus-5-5` | `medium` |
+| #8 opus_auto lần 2 | view | `claude-opus-5-5` | omitted |
+
+**Interpretation:** `selectedModel=auto` tương ứng Max trong lượt thử này; giá trị telemetry `aiModel=brain` không giống giá trị request wire `auto`. `selectedReasoningLevel` được **bỏ đi** trong lựa chọn Auto cuối cùng — không thể tuyên bố backend chắc chắn default Auto nếu chưa xác minh. Quan trọng: pha #5 telemetry nói `brain` nhưng HTTP request chat lại nói `claude-opus-5-5 + low`; điều này chứng minh telemetry UI và wire request **không thể dùng thay thế nhau**. `AIToolId` là opaque ID, không công bố hoặc tự giả định ý nghĩa.
+
+**Mức độ xác minh:** High cho tên field và enum trong request; **chưa xác minh** backend thực thi đúng model/effort được request và chưa có transport replay có auth hợp lệ. `comment-service` có thể là cửa vào workflow chat chứ không phải trực tiếp inference service.
+
+Đã bổ sung `extract_chat_wire_options()` trong `tools/analyze_brain_trace.py` để parser cục bộ xuất **chỉ model/effort whitelist**, cấm phát tán raw `comment_type_data.query`, AIToolId và opaque IDs.
+
+## 7. Next priorities
 
 1. Mở rộng analyzer để tự gắn `label#n` theo marker occurrence, nhận diện `click` vs `use`, HTTP failure vs 201, các WS AI lifecycle events.
 2. So sánh response/WS event chain cùng `conversation_id` và `ai_result_id` chỉ trong bộ nhớ cục bộ; **không công bố opaque IDs**.
