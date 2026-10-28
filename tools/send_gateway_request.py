@@ -38,6 +38,14 @@ DIAGNOSTIC_FIELDS = (
     "last_relation",
 )
 RELATION_VALUES = {"first", "same", "different", "unknown", "unobserved"}
+# Only safe aggregate integer counters from the Gateway. Optional for
+# backwards compatibility with pre-HTTP-counter Gateway processes.
+HTTP_DIAGNOSTIC_FIELDS = (
+    "http_chat_received",
+    "http_chat_2xx",
+    "http_chat_401",
+    "http_chat_other_errors",
+)
 
 
 class LocalClientError(Exception):
@@ -178,6 +186,15 @@ def safe_diagnostics(data: dict[str, Any]) -> dict[str, int | str]:
     if relation not in RELATION_VALUES:
         raise LocalClientError("Gateway returned invalid conversation relation.")
     out["last_relation"] = relation
+    # Previously dropped by the CLI despite being exposed by the Gateway.
+    # Keep strict numeric validation so no user data/opaque identifiers pass
+    # through even if the server sends extra unexpected fields.
+    for field in HTTP_DIAGNOSTIC_FIELDS:
+        if field in data:
+            number = data[field]
+            if type(number) is not int or number < 0:
+                raise LocalClientError("Gateway returned invalid HTTP counters.")
+            out[field] = number
     return out
 
 
