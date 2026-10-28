@@ -9,6 +9,17 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
+
+# Support BOTH:
+#   python -m tools.replay_brain_events ...   (module mode)
+#   python tools/replay_brain_events.py ...   (direct script on Windows/Linux)
+# Direct execution normally adds tools/ (not the repository root) to sys.path.
+# Importing the absolute "tools" namespace therefore fails without this bootstrap.
+if __package__ in (None, ""):
+    _repo_root = Path(__file__).resolve().parent.parent
+    if str(_repo_root) not in sys.path:
+        sys.path.insert(0, str(_repo_root))
 
 from tools.brain_event_decoder import load_jsonl
 from tools.conversation_correlator import ConversationEventCorrelator
