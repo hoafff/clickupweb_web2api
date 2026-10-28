@@ -1,6 +1,6 @@
 # 13 — Browser Session Adapter: live E2E smoke test
 
-**Status:** Browser-backed proof of concept available; **NOT YET tested against an actual logged-in ClickUp session**. GitHub CI tests the bridge with synthetic WS frames and fake UI locators on Windows/Linux. It cannot authenticate to the researcher's Workspace.
+**Status updated 2026-10-28:** User-confirmed **manual AND auto-send live E2E PASS** in logged-in ClickUp Brain session. Latest auto-send returned `OK` (15 received JSON WS frames, 1 matching AI reply). GitHub CI still tests with synthetic WS frames and fake UI locators; it cannot authenticate to the researcher's Workspace. **Local HTTP gateway code exists but HTTP→ClickUp live verification remains pending.**
 
 ## Objective and scope
 
@@ -91,12 +91,17 @@ Playwright visible Chromium (persistent local browser profile)
 |---|---|---|
 | B-01 WS in-memory reader & correlator | DONE | Unit tests synthetic WS |
 | B-02 Browser launch/manual interaction | IMPLEMENTED, LIVE UNVERIFIED | Must run on researcher's logged-in PC |
-| B-03 CSS-selector-based single auto-send | IMPLEMENTED, DOM UNVERIFIED | Fake-element tests only |
+| B-03 CSS-selector-based single auto-send | DONE (live) | User verified DOM, automatic UI submit, received `OK` |
 | B-04 Import via script and `-m` | DONE | CLI smoke tests on Windows/Linux CI |
-| B-05 Real live UI send → WS reply | TODO | Researcher runs manual E2E and reports output |
+| B-05 Real live UI send → WS reply | DONE (live) | User-confirmed manual + automatic E2E |
 | B-06 Multi-model+effort live regression | TODO | After B-05 and verified UI controls |
-| B-07 OpenAI-compatible gateway | NOT IMPLEMENTED | Requires adapter E2E and auth/session design |
+| B-07 OpenAI-like localhost JSON gateway | IMPLEMENTED, LIVE HTTP UNVERIFIED | `tools/local_gateway.py`, mock tests; see doc 15 |
 
 ## Security
 
 Persistent profile `.local/browser-profile/` contains sensitive authentication state and is Git-ignored. Do not commit or upload it. `--show-reply` prints actual message content; only enable on a trusted local terminal.
+
+
+## Gateway follow-up
+
+After live auto-send PASS, a local experimental JSON facade is documented in [doc 15](15_LOCAL_HTTP_GATEWAY.md). It is **not** hosted or a direct unofficial upstream API. Use the documented localhost Bearer flow for the next live HTTP E2E acceptance test.
