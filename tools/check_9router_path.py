@@ -29,6 +29,37 @@ class RouterPathError(Exception):
     """A safe error: never include a response body, key, or prompt."""
 
 
+def classify_auth_error(status: int, raw: bytes) -> str:
+    """Whitelist only known non-sensitive auth codes, never echo raw text."""
+    if status != 401:
+        return ""
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return "Auth response body unrecognized"
+    if not isinstance(data, dict):
+        return "Auth response body unrecognized"
+    nested = data.get("error")
+    error = nested if isinstance(nested, dict) else data
+    code = error.get("code")
+    kind = error.get("type")
+    message = error.get("message", error.get("detail"))
+    # Fields in response bodies are untrusted! Only return static strings.
+    if code == "invalid_api_key" or message == "Invalid API key":
+        return (
+            "invalid_api_key: likely 9Router client key rejected; "
+            "verify local API key and running 9Router process"
+        )
+    if code in ("authentication_error", "unauthorized") or kind == "authentication_error":
+        return (
+            "authentication_error: determine whether 9Router or upstream "
+            "returned 401 using Gateway HTTP counters"
+        )
+    if message in ("Unauthorized", "Not authenticated", "Invalid API key provided"):
+        return "unauthorized: check 9Router client key and Gateway upstream key"
+    return "Auth error shape not recognized; check redacted 9Router logs"
+
+
 def read_key(key_path: Path) -> str | None:
     if not key_path.is_file():
         return None
@@ -99,7 +130,18 @@ def request_router(
                 name.lower(): value for name, value in res.headers.items()
             }
     except urllib.error.HTTPError as exc:
-        raise RouterPathError(f"9Router HTTP {exc.code}; inspect its dashboard.") from exc
+        # Read only a small bounded error body and discard raw content.
+        # Print allowlisted, static classifications only; no API keys or
+        # potentially sensitive messages can be echoed to the terminal.
+        try:
+            auth_class = classify_auth_error(exc.code, exc.read(8192))
+        except (OSError, ValueError):
+            auth_class = ""
+        qualifier = (" " + auth_class) if auth_class else ""
+        raise RouterPathError(
+            f"9Router HTTP {exc.code}.{qualifier} "
+            "Inspect router-side request logs and Gateway diagnostics."
+        ) from exc
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         raise RouterPathError(
             "Cannot reach local 9Router. Check 127.0.0.1:20128 and its process."
