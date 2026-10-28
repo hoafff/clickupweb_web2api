@@ -45,6 +45,10 @@ HTTP_DIAGNOSTIC_FIELDS = (
     "http_chat_2xx",
     "http_chat_401",
     "http_chat_other_errors",
+    "http_chat_422",
+    "http_chat_429",
+    "http_chat_502",
+    "http_chat_503",
 )
 
 
