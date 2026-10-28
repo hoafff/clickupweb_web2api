@@ -118,6 +118,25 @@ class TraceAnalyzerTests(unittest.TestCase):
         )
         self.assertNotIn("secret-result-123", str(report))
 
+    def test_model_selection_is_parsed_from_query(self):
+        from tools.analyze_brain_trace import extract_chat_wire_options
+        entry = {"payload": {"data": {"comment_type_data": {
+            "query": "/?selectedModel=claude-opus-5-5&selectedReasoningLevel=low"
+        }}}}
+        result = extract_chat_wire_options(entry)
+        self.assertEqual(result["selected_model"], "claude-opus-5-5")
+        self.assertEqual(result["selected_effort"], "low")
+
+    def test_default_effort_is_not_inferred(self):
+        from tools.analyze_brain_trace import extract_chat_wire_options
+        entry = {"payload": {"data": {"comment_type_data": {
+            "query": "/?selectedModel=auto"
+        }}}}
+        result = extract_chat_wire_options(entry)
+        self.assertEqual(result["selected_model"], "auto")
+        self.assertIsNone(result["selected_effort"])
+        self.assertFalse(result["selected_effort_present"])
+
     def test_telemetry_output_whitelists_known_values(self):
         meta = [event("manual_marker", 1, label="max_first")]
         content = [telemetry(2, "private-secret-identifier", "private-secret-identifier")]
