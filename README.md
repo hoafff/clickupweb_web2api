@@ -568,3 +568,18 @@ git pull
 ```
 
 No Gateway/9Router restart and no new ClickUp prompts are required. **Share only the aggregate JSON counters**, never the original `.jsonl` or browser profile. Whether `chatCommentEdited` occurs *after* the AI reply or signals completion still needs independent evidence. Do not change `finish_reason=null` or buffered-SSE behavior based on these heuristics. Detailed research log: [docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md](docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md).
+
+
+## WebSocket completion research: live 8/8 start-to-comment correlation
+
+Researcher-confirmed second-pass audit of private local trace (2026-10-28): 602 rows / 203 inbound WS frames; 8 AI starts, 16 chat comments (8 with AI IDs, 8 without); **8/8 AI IDs matched**, 13 `chatCommentEdited` events with neither AI result IDs nor changed comment fields; 49 unknown chat-family events, 90 uncategorized. **No verified final-generation signal**. The 13 edits are NOT proven AI terminal markers.
+
+Added a non-invasive, **local-only, metadata-only** `tools/audit_brain_event_timeline.py` and synthetic tests to examine event shapes, temporal proximity and safe name-family counters. It does not print raw IDs, unknown event names, timestamps, prompts, credentials or response text. This checks *hypotheses*, never upgrades the Gateway's `finish_reason=null` or buffered-SSE semantics.
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\audit_brain_event_timeline.py artifacts\brain_v3_private_content.jsonl
+```
+
+No browser restart or AI request. Keep the trace PRIVATE; only share the resulting counter JSON. Evidence and caveats: [docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md](docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md).
