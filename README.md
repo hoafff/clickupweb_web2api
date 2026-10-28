@@ -64,9 +64,10 @@ Trình duyệt mở ở chế độ nhìn thấy được. Đăng nhập bằng 
 - [x] Static open-source survey.
 - [x] Chốt mô hình nghiên cứu có ủy quyền, menu multi-model từ ảnh.
 - [x] Thiết kế protocol observation và tracer metadata.
-- [ ] Chạy tracer với phiên ClickUp được cấp quyền, thu bằng chứng đã redacted.
-- [ ] Xác nhận endpoint, payload, transport, conversation identifiers và chọn model qua thực nghiệm.
-- [ ] Xây và test adapter theo schema đã xác nhận.
+- [x] Chạy tracer với phiên ClickUp được cấp quyền, thu bằng chứng đã redacted (V3).
+- [x] Xác minh HTTP chat command, selectedModel/selectedReasoningLevel và WS reply-created event trên V3; **chưa xác minh full inference/streaming transport**.
+- [x] Xây và kiểm thử offline conversation correlator; **chưa có browser/protocol adapter gửi prompt**.
+- [ ] Triển khai adapter gửi prompt và nhận response end-to-end trong phiên nghiên cứu được cấp quyền.
 - [ ] Demo OpenAI-compatible JSON/SSE, kiểm thử multi-model, quota và tính ổn định.
 
 ## Nguồn
@@ -146,3 +147,15 @@ git pull
 ```
 
 The default command prints only event counts, reply lengths and event-to-event timing, no prompt or IDs. For authorized local inspection only, add `--export-replies artifacts\brain_v3_local_replies.json` to write actual text to a **private ignored file**. Do not commit or share this file. The 8/8 reply matches from the V3 trace do **not** establish streaming-delta or a runnable standalone upstream API.
+
+
+## Async event correlation / V3 offline replay
+
+[State-machine design, tests and known limitations](docs/12_ASYNC_CORRELATOR.md) — `ConversationEventCorrelator` ghép `aiConversationStarted` ↔ `chatCommentCreated` theo `ai_result_id`, xác minh `conversation_id`, không trộn concurrent chats, hỗ trợ timeout, cancellation, duplicate, out-of-order và TTL/cache bounds.
+
+```powershell
+git pull
+.\.venv\Scripts\python.exe tools\replay_brain_events.py artifacts\brain_v3_private_content.jsonl --expected 8
+```
+
+Replay không có network access; chỉ xuất tổng số event/matches. Lần chạy trên trace V3 **chưa được thực hiện trong môi trường GitHub** (dữ liệu riêng tư không commit). Kỳ vọng 8 matches dựa trên decoder V3 người dùng đã chạy thành công. Không đồng nhất `reply_created` với model completion hay token streaming. Gateway và adapter live chưa được triển khai.
