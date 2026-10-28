@@ -74,6 +74,8 @@ Trình duyệt mở ở chế độ nhìn thấy được. Đăng nhập bằng 
 - [x] Auto-send Playwright trên ClickUp live PASS: 1/1 `OK`, 15 WebSocket JSON frames, không click tay.
 - [x] Tạo FastAPI JSON facade localhost, auth Bearer, đơn request, mock tests trên Windows/Linux.
 - [x] Live HTTP→Playwright→ClickUp→WS→JSON response E2E: request UTF-8 trên Windows PowerShell trả về `OK`.
+- [x] Authenticated `/v1/session/diagnostics` so sánh conversation IDs trong bộ nhớ, **không lộ ID** (mock CI).
+- [ ] Chạy 2 HTTP prompts liên tiếp để kiểm tra `same/different` thực tế.
 - [ ] Streaming/SSE, model switch tự động, quota/usage, multi-session và cloud hosting.
 
 ## Nguồn
@@ -307,3 +309,17 @@ $response.choices[0].message.content
 ```
 
 Terminal trả về chính xác `OK`. Điều này xác minh **một lượt local HTTP → Playwright UI send → WS reply-created → HTTP JSON response**, không chứng minh độ bền 24/7, khôi phục phiên, streaming, multi-turn hay model switching qua HTTP. Xem [biên bản nghiệm thu và deployment gates](docs/16_LIVE_HTTP_ACCEPTANCE_AND_DEPLOYMENT_GATES.md).
+
+
+### Session diagnostics để kiểm tra context giữa các request (mới)
+
+[Roadmap cloud và tiêu chí nghiệm thu](docs/16_LIVE_HTTP_ACCEPTANCE_AND_DEPLOYMENT_GATES.md). Gateway có `GET /v1/session/diagnostics` yêu cầu Bearer key, **chỉ trả số lần reply + same/different conversation**, không trả ID hay nội dung:
+
+```powershell
+# Sau git pull, phải khởi động lại gateway để nạp code mới.
+$env:CLICKUP_GATEWAY_API_KEY = (Get-Content -Raw .local\gateway.key).Trim()
+$headers = @{ Authorization = "Bearer $env:CLICKUP_GATEWAY_API_KEY" }
+Invoke-RestMethod http://127.0.0.1:8787/v1/session/diagnostics -Headers $headers
+```
+
+Đây là công cụ chuẩn bị cho kiểm thử **hai HTTP prompts liên tiếp**: check liệu WS `conversation_id` có giống nhau sau mỗi response, **không** kiểm chứng model nhớ nội dung. Endpoint đã kiểm tra mock; dữ liệu live cho multi-turn chưa có. Không công khai gateway hay profile.
