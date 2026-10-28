@@ -145,6 +145,7 @@ The body parse error occurs before the `chat` handler calls Playwright; it shoul
 |---|---|
 | `POST /v1/chat/completions` JSON | **Live E2E PASS** for one request with one Vietnamese prompt; durability/scale unverified |
 | `GET /v1/models` | Returns only `clickup-ui-current` |
+| `GET /v1/session/diagnostics` | Authenticated; returns safe counts and whether previous two WS reply conversation IDs match; **no raw IDs** |
 | Auth | Local Bearer key, minimum 24 chars, constant-time compare |
 | Model/effort | **Current selection in ClickUp UI**; no automatic switching |
 | Messages | Exactly **one** nonempty `role=user` text message, max 8,000 chars |
@@ -196,3 +197,19 @@ Verified local path: bearer-authenticated `POST /v1/chat/completions` → FastAP
 **Evidence limits:** The prompt was a short single user message and model/effort selection was done manually in the UI. We did not observe the full HTTP JSON response in the supplied terminal excerpt, nor an end-of-generation signal, token accounting, multi-turn isolation, restart/re-auth, headless Chrome, cloud deployment or any remote client. Treat all those as **TODO / UNVERIFIED**. The original request bytes causing JSON parsing failure were not captured, so the exact encoding root cause remains an informed hypothesis; explicit UTF-8 is a confirmed workaround.
 
 Next gates: [16 — acceptance and cloud-readiness](16_LIVE_HTTP_ACCEPTANCE_AND_DEPLOYMENT_GATES.md).
+
+## 9. Private session diagnostics (follow-up test, live unverified)
+
+After the first confirmed live HTTP E2E, a **new** endpoint was added to observe whether successive requests reuse a ClickUp conversation without disclosing opaque IDs:
+
+```powershell
+# Restart gateway after git pull because server does not hot-reload.
+$env:CLICKUP_GATEWAY_API_KEY = (Get-Content -Raw .local\gateway.key).Trim()
+$headers = @{ Authorization = "Bearer $env:CLICKUP_GATEWAY_API_KEY" }
+
+Invoke-RestMethod http://127.0.0.1:8787/v1/session/diagnostics -Headers $headers
+```
+
+For this newly started gateway, `completed_replies` begins at 0, and `last_relation=unobserved`. Each successful HTTP completion increments the counter. After at least 2 successful sequential requests with available `conversation_id` values, `last_relation` is `same` or `different`; the response never contains the actual ClickUp IDs.
+
+This endpoint is protected by the same local Bearer key. It currently records **conversations shared by replies**, not verified new-chat boundaries or token-level streaming. It is a diagnostic step towards G-03, **not multi-user context isolation**.
