@@ -25,6 +25,11 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
+try:
+    from tools.payload_capture import allows_http_body, parse_content
+except ModuleNotFoundError:
+    from payload_capture import allows_http_body, parse_content
+
 from playwright.async_api import (
     BrowserContext,
     Error as PlaywrightError,
@@ -160,12 +165,84 @@ class TraceSink:
 
 
 class NetworkObserver:
-    def __init__(self, sink: TraceSink, hosts: tuple[str, ...], capture_ws_schema: bool = False) -> None:
+    def __init__(
+        self,
+        sink: TraceSink,
+        hosts: tuple[str, ...],
+        capture_ws_schema: bool = False,
+        *,
+        content_sink: TraceSink | None = None,
+        max_content_bytes: int = 196_608,
+    ) -> None:
         self.sink = sink
         self.hosts = hosts
         self.capture_ws_schema = capture_ws_schema
+        self.content_sink = content_sink
+        self.max_content_bytes = max_content_bytes
+        self.current_phase = "unmarked"
         self._request_starts: dict[int, float] = {}
+        self._request_phases: dict[int, str] = {}
+        self._pending: set[asyncio.Task] = set()
         self._seen_pages: set[int] = set()
+
+    def mark(self, label: str) -> None:
+        self.current_phase = label
+        self.sink.write("manual_marker", label=label)
+        if self.content_sink is not None:
+            self.content_sink.write("manual_marker", label=label)
+
+    async def flush(self) -> None:
+        """Wait for response-body reads before closing the browser and sinks."""
+        if self._pending:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tuple(self._pending), return_exceptions=True),
+                    timeout=15,
+                )
+            except asyncio.TimeoutError:
+                for task in tuple(self._pending):
+                    task.cancel()
+                await asyncio.gather(*tuple(self._pending), return_exceptions=True)
+
+    async def _capture_response(self, request: Request) -> None:
+        if self.content_sink is None:
+            return
+        try:
+            response = await request.response()
+            if response is None:
+                return
+            ct = response.headers.get("content-type", "")
+            if not allows_http_body(ct):
+                return
+            raw_length = response.headers.get("content-length", "")
+            if raw_length.isdecimal() and int(raw_length) > self.max_content_bytes:
+                return
+            raw = await response.body()
+            result = parse_content(
+                raw, content_type=ct, max_bytes=self.max_content_bytes
+            )
+            if result.get("format") in {"json", "sse_json"}:
+                self.content_sink.write(
+                    "http_response_content",
+                    request_id=str(id(request)),
+                    phase=self._request_phases.get(id(request), "unmarked"),
+                    method=request.method,
+                    url=sanitize_url(request.url),
+                    content_type=ct.split(";")[0].strip().lower(),
+                    status=response.status,
+                    payload=result,
+                )
+        except (PlaywrightError, ValueError, TypeError):
+            # Body may be unavailable after disconnect/redirect.
+            return
+
+    def _schedule_response_capture(self, request: Request) -> None:
+        if self.content_sink is None:
+            return
+        task = asyncio.create_task(self._capture_response(request))
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
 
     def watch_context(self, context: BrowserContext) -> None:
         context.on("request", self.on_request)
@@ -187,6 +264,23 @@ class NetworkObserver:
         if not host_in_scope(request.url, self.hosts):
             return
         self._request_starts[id(request)] = time.monotonic()
+        self._request_phases[id(request)] = self.current_phase
+        if self.content_sink is not None:
+            try:
+                raw = request.post_data_buffer
+                if raw:
+                    payload = parse_content(raw, max_bytes=self.max_content_bytes)
+                    if payload.get("format") == "json":
+                        self.content_sink.write(
+                            "http_request_content",
+                            request_id=str(id(request)),
+                            phase=self.current_phase,
+                            method=request.method,
+                            url=sanitize_url(request.url),
+                            payload=payload,
+                        )
+            except (ValueError, TypeError, PlaywrightError):
+                pass
         self.sink.write(
             "http_request",
             request_id=str(id(request)),
@@ -225,6 +319,7 @@ class NetworkObserver:
             request_id=str(id(request)),
             duration_ms=self._duration_ms(request),
         )
+        self._schedule_response_capture(request)
 
     def on_request_failed(self, request: Request) -> None:
         if not host_in_scope(request.url, self.hosts):
@@ -235,6 +330,7 @@ class NetworkObserver:
             request_id=str(id(request)),
             duration_ms=self._duration_ms(request),
         )
+        self._request_phases.pop(id(request), None)
 
     def on_websocket(self, ws: WebSocket) -> None:
         if not host_in_scope(ws.url, self.hosts):
@@ -244,6 +340,17 @@ class NetworkObserver:
         self.sink.write("ws_open", websocket_id=ws_id, url=path)
 
         def frame(direction: str, data: str | bytes) -> None:
+            if self.content_sink is not None and isinstance(data, str):
+                payload = parse_content(data, max_bytes=self.max_content_bytes)
+                if payload.get("format") == "json":
+                    self.content_sink.write(
+                        "ws_frame_content",
+                        websocket_id=ws_id,
+                        direction=direction,
+                        phase=self.current_phase,
+                        url=path,
+                        payload=payload,
+                    )
             self.sink.write(
                 "ws_frame",
                 websocket_id=ws_id,
@@ -274,6 +381,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile-dir", type=Path, default=DEFAULT_PROFILE_PATH)
     parser.add_argument("--timeout", type=int, default=45, help="Navigation timeout seconds")
     parser.add_argument("--capture-ws-schema", action="store_true", help="Record JSON key paths from WebSocket frames (never values); opt-in")
+    parser.add_argument(
+        "--capture-content",
+        action="store_true",
+        help="OPT-IN: record sanitized JSON request/response and WS payloads to a separate PRIVATE file",
+    )
+    parser.add_argument(
+        "--content-output",
+        type=Path,
+        default=PROJECT_ROOT / "artifacts" / "brain_private_content.jsonl",
+    )
+    parser.add_argument(
+        "--max-content-bytes",
+        type=int,
+        default=196_608,
+        help="Max bytes to retain per JSON/WS response (default 192 KiB)",
+    )
     return parser.parse_args()
 
 
@@ -293,6 +416,15 @@ async def main() -> int:
 
     output = args.output.expanduser().resolve()
     profile = args.profile_dir.expanduser().resolve()
+    content_output = args.content_output.expanduser().resolve()
+    if args.capture_content and (
+        content_output == output or content_output.is_relative_to(profile)
+    ):
+        print("Content output must differ from metadata output and browser profile.", file=sys.stderr)
+        return 2
+    if not 1_024 <= args.max_content_bytes <= 1_048_576:
+        print("--max-content-bytes must be between 1 KiB and 1 MiB.", file=sys.stderr)
+        return 2
     if output.is_relative_to(profile):
         print("Output cannot be located inside the persistent browser profile.", file=sys.stderr)
         return 2
@@ -301,10 +433,16 @@ async def main() -> int:
     print(f"Trace: {output}")
     print(f"Persistent browser profile (SENSITIVE): {profile}")
     print(f"Allowed hosts: {', '.join(hosts)}")
-    print("Recording request metadata / JSON keys / WebSocket frame lengths ONLY.")
+    if args.capture_content:
+        print(f"PRIVATE JSON content file: {content_output}")
+        print("Sensitive contents may remain even after best-effort redaction.")
+        print("Never publish this file or raw browser profile without manual review.")
+    else:
+        print("Recording request metadata / JSON keys / WebSocket frame lengths ONLY.")
     print("Do not share browser profile or raw account data.")
 
     sink = TraceSink(output)
+    content_sink = TraceSink(content_output) if args.capture_content else None
     try:
         async with async_playwright() as playwright:
             context = await playwright.chromium.launch_persistent_context(
@@ -312,7 +450,13 @@ async def main() -> int:
                 headless=False,
                 accept_downloads=False,
             )
-            observer = NetworkObserver(sink, hosts, capture_ws_schema=args.capture_ws_schema)
+            observer = NetworkObserver(
+                sink,
+                hosts,
+                capture_ws_schema=args.capture_ws_schema,
+                content_sink=content_sink,
+                max_content_bytes=args.max_content_bytes,
+            )
             observer.watch_context(context)
 
             page = context.pages[0] if context.pages else await context.new_page()
@@ -339,17 +483,22 @@ async def main() -> int:
                 if line.lower().startswith("mark "):
                     label = line[5:].strip()
                     if re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", label):
-                        sink.write("manual_marker", label=label)
+                        observer.mark(label)
                         print(f"Marker recorded: {label}")
                     else:
                         print("Marker must be 1-32 letters, digits, '_' or '-'.")
                 else:
                     print("Use 'mark NAME' or ENTER to finish.")
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.5)
+            await observer.flush()
             await context.close()
     finally:
         sink.close()
-    print(f"Recorded {sink.count} event(s) in {output}.")
+        if content_sink is not None:
+            content_sink.close()
+    print(f"Recorded {sink.count} metadata event(s) in {output}.")
+    if content_sink is not None:
+        print(f"Recorded {content_sink.count} private content event(s) in {content_output}.")
     return 0
 
 
