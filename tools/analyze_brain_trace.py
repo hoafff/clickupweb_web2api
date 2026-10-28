@@ -146,6 +146,9 @@ def summarize(
         })
 
     ws_counts: dict[int, Counter] = defaultdict(Counter)
+    # Opaque IDs are used ONLY for in-memory event correlation, not returned.
+    started_by_result: dict[str, int] = {}
+    comment_created: list[tuple[str, int]] = []
     for record in content:
         try:
             i = assign_phase(record, phases)
@@ -163,6 +166,22 @@ def summarize(
         name = _ws_event_name(record)
         if name is not None:
             ws_counts[i][name] += 1
+            data = record.get("payload", {}).get("data", {})
+            evt = data.get("event", {}) if isinstance(data, dict) else {}
+            if isinstance(evt, dict) and name == "aiConversationStarted":
+                raw = evt.get("payload", {})
+                result_id = raw.get("ai_result_id") if isinstance(raw, dict) else None
+                if isinstance(result_id, (str, int)) and str(result_id):
+                    started_by_result[str(result_id)] = i
+            elif isinstance(evt, dict) and name == "chatCommentCreated":
+                version_data = evt.get("version_event_data", {})
+                changes = version_data.get("changes", []) if isinstance(version_data, dict) else []
+                if isinstance(changes, list):
+                    for item in changes:
+                        if isinstance(item, dict) and item.get("field") == "ai_result_id":
+                            result_id = item.get("after")
+                            if isinstance(result_id, (str, int)) and str(result_id):
+                                comment_created.append((str(result_id), i))
 
         telem = _telemetry(record)
         if telem is not None:
@@ -175,7 +194,28 @@ def summarize(
     for i, counts in ws_counts.items():
         summaries[i]["ws_events"] = dict(counts)
 
+    across_marker = []
+    matched = 0
+    matched_pairs = set()
+    for result_id, emitted_phase in comment_created:
+        started_phase = started_by_result.get(result_id)
+        if started_phase is None:
+            continue
+        pair = (started_phase, emitted_phase)
+        if (result_id, emitted_phase) in matched_pairs:
+            continue
+        matched_pairs.add((result_id, emitted_phase))
+        matched += 1
+        if started_phase != emitted_phase:
+            across_marker.append({
+                "started_phase": started_phase,
+                "event_phase": emitted_phase,
+                "event": "chatCommentCreated",
+            })
+
     return {
+        "matched_ai_start_to_comment_created": matched,
+        "cross_marker_correlations": across_marker,
         "meta_event_count": len(meta),
         "private_event_count": len(content),
         "phase_count_excluding_unmarked": len(phases) - 1,
@@ -201,6 +241,9 @@ def main() -> int:
     print(f"Events: {report['meta_event_count']}; "
           f"private records: {report['private_event_count']}; "
           f"markers: {report['phase_count_excluding_unmarked']}")
+    for item in report["cross_marker_correlations"]:
+        print(f"Cross-marker AI correlation: phase #{item['started_phase']}"
+              f" → phase #{item['event_phase']} ({item['event']})")
     for phase in report["phases"][1:]:
         print(f"\n#{phase['index']} {phase['marker']}")
         for cmd in phase["chat_commands"]:
