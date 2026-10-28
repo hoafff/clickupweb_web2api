@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import json
+import re
 from pathlib import Path
 import sys
 import threading
@@ -99,11 +100,51 @@ def summarise(samples: list[dict], failures: int) -> dict:
         **{f + "_nonzero_samples": counts[f + "_nonzero_samples"] for f in COUNT_FIELDS},
         "stop_control_hint_samples": counts["stop_control_hint_samples"],
         "generating_control_hint_samples": counts["generating_control_hint_samples"],
+        **observe_transitions(samples),
         "interpretation": (
             "Candidate UI controls only. A stop/busy label does not prove "
             "generation is active, and its disappearance is NOT a verified "
             "upstream end-of-generation signal."
         ),
+    }
+
+
+def classify_router_failure(error: RouterPathError) -> dict:
+    """Return ONLY static categories and a numeric HTTP status (never raw body)."""
+    reason = str(error)
+    match = re.search(r"\b9Router HTTP ([4-5][0-9]{2})\b", reason)
+    if match:
+        return {
+            "router_error_category": "http_error",
+            "router_http_status": int(match.group(1)),
+        }
+    if "timed out" in reason.lower():
+        category = "client_read_timeout"
+    elif "Cannot reach local 9Router" in reason:
+        category = "router_transport_failure"
+    elif "Chat Completion" in reason or "Expected JSON" in reason:
+        category = "unexpected_router_response"
+    else:
+        category = "other_router_client_failure"
+    return {
+        "router_error_category": category,
+        "router_http_status": None,
+    }
+
+
+def observe_transitions(samples: list[dict]) -> dict:
+    """Count coarse Stop appearance/disappearance without timestamps/content."""
+    states = [bool(s["stop_near_composer_count"] > 0) for s in samples]
+    return {
+        "stop_appearance_transitions": sum(
+            not a and b for a, b in zip(states, states[1:])
+        ),
+        "stop_disappearance_transitions": sum(
+            a and not b for a, b in zip(states, states[1:])
+        ),
+        "stop_visible_first_sample": states[0] if states else None,
+        "stop_visible_last_sample": states[-1] if states else None,
+        "stop_ever_visible": any(states),
     }
 
 
@@ -141,8 +182,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--key-file", type=Path, default=DEFAULT_KEY_FILE)
     p.add_argument("--router-key-file", type=Path, default=ROUTER_KEYFILE)
     args = p.parse_args(argv)
-    if not 1 <= args.samples <= 120 or not 0.2 <= args.interval <= 3:
-        p.error("--samples must be 1..120 and --interval must be 0.2..3.")
+    if not 1 <= args.samples <= 480 or not 0.2 <= args.interval <= 3:
+        p.error("--samples must be 1..480 and --interval must be 0.2..3.")
     try:
         key = load_key(args.key_file)
         # Require a read-only baseline before optionally consuming AI credits.
@@ -185,22 +226,47 @@ def main(argv: list[str] | None = None) -> int:
         worker.start()
         failure = None
         reply_length = None
+        request_started = time.monotonic()
         try:
             answer, _ = chat_once(
                 model=MODEL, port=args.router_port, key=router_key,
                 prompt=RESEARCH_PROMPT, stream=False,
             )
             reply_length = len(answer)
-        except RouterPathError:
-            failure = "9Router benign text request failed; inspect local processes."
+        except RouterPathError as exc:
+            failure = classify_router_failure(exc)
         finally:
+            duration = round(time.monotonic() - request_started, 2)
             stop.set()
             worker.join(timeout=min(20.0, args.samples * args.interval + 8))
         if "summary" not in outcome:
             raise ResearchProbeError("UI sample thread did not finish cleanly.")
-        print(json.dumps(outcome["summary"], indent=2))
+        report = outcome["summary"]
+        report["router_request_elapsed_seconds"] = duration
+        report["router_request_outcome"] = "error" if failure else "success"
         if failure:
-            raise ResearchProbeError(failure)
+            report.update(failure)
+        else:
+            report["router_reply_characters"] = reply_length
+        # Observe the UI once MORE after the HTTP caller finished or failed.
+        # This is critical when sampling ended before an upstream timeout.
+        try:
+            after = get_snapshot(port=args.port, key=key)
+            report["post_request_snapshot_ok"] = True
+            report["post_request_stop_near_composer"] = (
+                after["stop_near_composer_count"] > 0
+            )
+            report["post_request_composer_visible"] = after["composer_visible"]
+        except ResearchProbeError:
+            report["post_request_snapshot_ok"] = False
+            report["post_request_stop_near_composer"] = None
+            report["post_request_composer_visible"] = None
+        print(json.dumps(report, indent=2))
+        if failure:
+            raise ResearchProbeError(
+                "9Router routed request failed; see the SAFE category/status "
+                "above. Do NOT retry blindly: the UI prompt may have been sent."
+            )
         print("9Router text request returned; reply character count:", reply_length)
         print("No generation completion was inferred from UI metadata.")
         return 0
