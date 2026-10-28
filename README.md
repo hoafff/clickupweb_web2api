@@ -652,3 +652,16 @@ Invoke-RestMethod http://127.0.0.1:8787/healthz
 ```
 
 The UI Stop hint is only an observation, **not** a verified final-generation signal. See [docs/21_UI_COMPLETION_RESEARCH.md](docs/21_UI_COMPLETION_RESEARCH.md). The next actionable fix depends on the actual 422/429/502/503 status, not a speculative timeout increase.
+
+## 2026-10-28 — Live controlled long-request rerun PASSED; UI Stop cycle observed
+
+Operator confirmed a **single full 9Router → Gateway → authorized Brain²** call after restarting Gateway:
+
+- `router_request_outcome=success`, `router_request_elapsed_seconds=20.12`, `router_reply_characters=1611`.
+- UI metadata: 43 valid samples, 0 failures; 19 samples with a Stop-like control near composer; **1 appearance → 1 disappearance**, initially absent and absent after response.
+- Gateway: `http_chat_received=1`, `http_chat_2xx=1`, `http_chat_other_errors=0`; `422/429/502/503=0`; `completed_replies=1`.
+- This **does not establish** that the earlier failed long request is fixed, or that Stop disappearance is a terminal inference event.
+
+Added research-only fields in `check_brain_ui_state.py` that track whether Stop disappeared **before the Python 9Router HTTP call returned**, and whether a *fixed public suffix* `UI_RESEARCH_END` is present at the end of the returned text. Outputs are counts/booleans only. These new fields have **synthetic CI tests but no live sample yet** and do not change production Gateway response selection.
+
+**No immediate retest required.** Keep the confirmed functional local JSON/SSE path running. If investigating completion later, `git pull` updates the CLI without a Gateway restart; the next **optional** `--drive-router` call will include the new observations and may spend ClickUp credits. Details: [docs/21_UI_COMPLETION_RESEARCH.md](docs/21_UI_COMPLETION_RESEARCH.md). The definitive server-side completion event and resilient session recovery remain open tasks.
