@@ -40,6 +40,11 @@ from tools.browser_adapter import (
     _send_via_ui,
 )
 from tools.inspect_brain_ui import select_brain_page
+from tools.brain_start_url import (
+    choose_start_url,
+    normalize_brain_start_url,
+    remember_start_url,
+)
 from tools.session_lease import (
     ExclusiveSessionLease, SessionAlreadyClaimedError,
     SessionNotClaimedError, SessionAccessDeniedError,
@@ -379,8 +384,9 @@ async def serve(args: argparse.Namespace, api_key: str) -> None:
     import uvicorn
 
     profile = args.profile_dir.expanduser().resolve()
+    launch_url = choose_start_url(args.url)
     async with LiveBrowserEngine(
-        profile=profile, url=args.url, timeout=args.timeout,
+        profile=profile, url=launch_url, timeout=args.timeout,
         strict_conversation=args.require_session,
     ) as engine:
         print("Visible Chromium launched. Log in to your authorized Workspace.")
@@ -391,8 +397,16 @@ async def serve(args: argparse.Namespace, api_key: str) -> None:
         )
         # Validate page before accepting an API request; no raw IDs are printed.
         page = select_brain_page(engine._context.pages)
-        if "/ai/brain" not in urlsplit(page.url).path:
-            raise GatewayUnavailableError("Navigate to Brain Ask first.")
+        try:
+            normalize_brain_start_url(page.url)
+        except ValueError as exc:
+            raise GatewayUnavailableError(
+                "Navigate to the workspace Brain Ask page first."
+            ) from exc
+        # Persist only workspace Brain landing; NEVER save ?conversationId=...
+        # This fixes Chromium reopening at Workspace Overview after a restart.
+        remember_start_url(page.url)
+        print("Brain landing page remembered locally for next gateway start.")
         engine.mark_ready()
         app = create_app(
             engine, api_key=api_key, require_session=args.require_session
@@ -418,7 +432,10 @@ async def serve(args: argparse.Namespace, api_key: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default="https://app.clickup.com/")
+    parser.add_argument(
+        "--url", default=None,
+        help="Optional ClickUp URL; otherwise restore last verified Brain route",
+    )
     parser.add_argument("--profile-dir", type=Path, default=DEFAULT_PROFILE)
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--timeout", type=float, default=120)
@@ -433,7 +450,7 @@ def main() -> int:
             "Set CLICKUP_GATEWAY_API_KEY to a unique random value >=24 chars "
             "before starting; it will not be printed."
         )
-    if not validate_clickup_app_url(args.url):
+    if args.url is not None and not validate_clickup_app_url(args.url):
         parser.error("--url must be HTTPS app.clickup.com")
     if not 1024 <= args.port <= 65535 or not 5 <= args.timeout <= 600:
         parser.error("--port must be 1024..65535 and --timeout 5..600 seconds")
