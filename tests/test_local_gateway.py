@@ -129,6 +129,31 @@ class GatewayHTTPTests(unittest.TestCase):
         self.assertNotIn("conversation_id", response.text)
         self.assertNotIn("ai_result_id", response.text)
 
+    def test_safe_gateway_http_counters_distinguish_401_and_upstream_dispatch(self):
+        before = self.client.get("/v1/session/diagnostics", headers=AUTH).json()
+        self.assertEqual(before["http_chat_received"], 0)
+        self.assertEqual(before["http_chat_401"], 0)
+        self.assertEqual(before["http_chat_2xx"], 0)
+
+        # 401 returns before any UI/browser prompt submission.
+        no_auth = self.client.post("/v1/chat/completions", json=VALID)
+        self.assertEqual(no_auth.status_code, 401)
+        counters = self.client.get("/v1/session/diagnostics", headers=AUTH).json()
+        self.assertEqual(counters["http_chat_received"], 1)
+        self.assertEqual(counters["http_chat_401"], 1)
+        self.assertEqual(counters["http_chat_2xx"], 0)
+        self.assertEqual(self.engine.calls, [])
+
+        good = self.client.post("/v1/chat/completions", headers=AUTH, json=VALID)
+        self.assertEqual(good.status_code, 200)
+        counters = self.client.get("/v1/session/diagnostics", headers=AUTH).json()
+        self.assertEqual(counters["http_chat_received"], 2)
+        self.assertEqual(counters["http_chat_401"], 1)
+        self.assertEqual(counters["http_chat_2xx"], 1)
+        self.assertNotIn("Authorization", str(counters))
+        self.assertNotIn("conversation_id", str(counters))
+        self.assertNotIn(KEY, str(counters))
+
     def test_models_only_advertises_browser_current_alias(self):
         no_auth = self.client.get("/v1/models")
         self.assertEqual(no_auth.status_code, 401)
