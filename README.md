@@ -431,3 +431,30 @@ git pull
 ```
 
 Lưu ý: `--stream` tạo một **prompt thật** và có thể tốn hạn mức. API trả SSE **buffered**, không có token streaming realtime. Sau khi test thành công mới chuyển sang kiểm chứng node Custom OpenAI Compatible trong 9Router trên **cùng máy**, xem [hướng dẫn](docs/18_9ROUTER_BASIC_COMPAT.md).
+
+
+## 9Router-through-ClickUp end-to-end — next live milestone
+
+Router-mode in ClickUp Gateway **đã PASS trên máy thật**: JSON `OK`, history `ALPHA`, SSE buffered `OK`, diagnostics `completed_replies=4`, `different_conversation_pairs=3`. **Chưa có bằng chứng request đi qua 9Router cổng 20128.**
+
+Đã thêm [`tools/check_9router_path.py`](tools/check_9router_path.py) và [test HTTP loopback](tests/test_check_9router_path.py), dùng **một 9Router client API key riêng** với Gateway upstream key; không dùng file `.ps1`, không in secrets.
+
+Sau khi thêm node OpenAI Compatible trong dashboard của 9Router đang chạy trên **cùng Windows host** (Prefix `brain`, Base URL `http://127.0.0.1:8787/v1`, API type `Chat Completions`, model `clickup-ui-current`), nhớ **tạo API-key connection cho node** chứ không chỉ bấm Check. PowerShell 2:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+# Nếu 9Router yêu cầu API key phía client, lấy từ 9Router API Keys dashboard:
+.\.venv\Scripts\python.exe tools\check_9router_path.py --save-key
+
+# Không gọi model, không tốn ClickUp credits
+.\.venv\Scripts\python.exe tools\check_9router_path.py --models-only
+
+# Mỗi lệnh sau sẽ gửi MỘT tin thật qua 9Router → Gateway → Brain
+.\.venv\Scripts\python.exe tools\check_9router_path.py
+.\.venv\Scripts\python.exe tools\check_9router_path.py --stream
+```
+
+`--save-key` sử dụng `getpass` và lưu riêng `.local/ninerouter.key` (Git-ignored), **không** lấy `.local/gateway.key` thay thế. Nếu 9Router local cho phép không cần key thì bỏ qua `--save-key`. Kết quả kỳ vọng `brain/clickup-ui-current` xuất hiện trong `/v1/models` của 9Router và test in `9Router -> Brain Gateway -> ClickUp: PASS`. **Lượt kiểm thử 9Router thực tế chưa được xác nhận.** Các client coding agent cần tool calling/real-time streaming còn chưa được hỗ trợ.
+
+**Bảo mật:** 9Router từng có các lỗi bypass xác thực trên phiên bản cũ (ví dụ CVE-2026-55641 và CVE-2026-56681, đã có bản vá). Chỉ bind 9Router và Gateway vào loopback, xác minh phiên bản hiện hành và tránh tunnel/public exposure. 9Router trong Docker/cloud không thể dùng `127.0.0.1:8787` để đến Gateway trên máy Windows. Xem [doc 18](docs/18_9ROUTER_BASIC_COMPAT.md) và [GitHub Advisory](https://github.com/advisories/GHSA-86m2-fcxq-5q7c).
