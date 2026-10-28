@@ -48,6 +48,7 @@ from tools.brain_start_url import (
 from tools.router_compat import (
     RouterChatRequest, flatten_messages, make_chat_completion, make_buffered_sse,
 )
+from tools.brain_ui_state_probe import BRAIN_UI_STATE_JS, sanitize_ui_snapshot
 from tools.session_lease import (
     ExclusiveSessionLease, SessionAlreadyClaimedError,
     SessionNotClaimedError, SessionAccessDeniedError,
@@ -93,7 +94,7 @@ class ChatRequest(BaseModel):
 
 def create_app(
     engine: PromptEngine, *, api_key: str, require_session: bool = False,
-    router_mode: bool = False,
+    router_mode: bool = False, ui_research: bool = False,
 ) -> FastAPI:
     """Build an app with an injectable engine for fully offline tests."""
     if len(api_key) < 24:
@@ -241,6 +242,27 @@ def create_app(
                        "inspect browser and restart.",
             ) from exc
 
+    # Explicit opt-in diagnostic. Never publish a read-only UI endpoint by
+    # default, even on loopback. It does not affect reply selection.
+    if ui_research:
+        @app.get("/v1/research/ui-state", dependencies=[
+            Depends(require_api_key), Depends(require_owner),
+        ])
+        async def ui_state():
+            if not engine.is_ready():
+                raise HTTPException(status_code=503, detail="Browser not ready.")
+            snapshot_fn = getattr(engine, "snapshot_ui_state", None)
+            if snapshot_fn is None:
+                raise HTTPException(status_code=503, detail="UI research unsupported.")
+            try:
+                raw = await asyncio.wait_for(snapshot_fn(), timeout=3.0)
+                return sanitize_ui_snapshot(raw)
+            except (asyncio.TimeoutError, Exception) as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="UI metadata probe unavailable; inspect the browser.",
+                ) from exc
+
     if router_mode:
         @app.post("/v1/chat/completions", dependencies=[
             Depends(require_api_key),
@@ -372,6 +394,24 @@ class LiveBrowserEngine:
             await self.__aexit__(None, None, None)
             raise
         return self
+
+    async def snapshot_ui_state(self) -> dict[str, int | bool]:
+        """Read-only visible UI control metadata, never message text/IDs.
+
+        Probing does not take the exclusive send lock, enabling observation
+        while a single authorized request is still running. It is safe to
+        return 503 during navigation; no browser/session state is modified.
+        """
+        if not self.is_ready() or self._context is None:
+            raise GatewayUnavailableError("Browser unavailable.")
+        page = select_brain_page(self._context.pages)
+        parts = urlsplit(page.url)
+        if parts.scheme != "https" or parts.hostname != "app.clickup.com":
+            raise GatewayUnavailableError("Unexpected browser host.")
+        if "/ai/brain" not in parts.path:
+            raise GatewayUnavailableError("Not on the Brain page.")
+        raw = await page.evaluate(BRAIN_UI_STATE_JS)
+        return sanitize_ui_snapshot(raw)
 
     def mark_ready(self) -> None:
         if self._context is None:
@@ -505,12 +545,17 @@ async def serve(args: argparse.Namespace, api_key: str) -> None:
         app = create_app(
             engine, api_key=api_key, require_session=args.require_session,
             router_mode=args.router_mode,
+            ui_research=args.ui_research,
         )
         config = uvicorn.Config(
             app, host="127.0.0.1", port=args.port,
             access_log=False, log_level="warning",
         )
         print(f"LOCAL API ready at http://127.0.0.1:{args.port}")
+        if args.ui_research:
+            print("UI RESEARCH: authorized metadata-only /v1/research/ui-state enabled.")
+            print("No chat text, IDs, or raw control labels leave the browser.")
+            print("UI control hints are NOT verified generation-complete signals.")
         if args.router_mode:
             print("9ROUTER BASIC MODE: isolated fresh Brain chat per request.")
             print("Model: clickup-ui-current; text-only Chat Completions.")
@@ -541,6 +586,10 @@ def main() -> int:
     parser.add_argument("--profile-dir", type=Path, default=DEFAULT_PROFILE)
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument(
+        "--ui-research", action="store_true",
+        help="Opt-in authenticated read-only UI state snapshots; not a completion signal",
+    )
     parser.add_argument(
         "--router-mode", action="store_true",
         help="Basic OpenAI-compatible text/SSE facade for one local 9Router provider",
