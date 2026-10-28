@@ -1,6 +1,6 @@
 # 18 — 9Router / OpenAI-compatible Basic Text Mode
 
-**Status:** Implemented and synthetic CI tests PASS (Windows + Ubuntu). **NOT YET verified through an actual user's 9Router process.** The user's previous local browser Gateway and `--require-session` live tests PASS. 9Router-specific flow still requires a controlled live smoke test.
+**Status:** Implemented and synthetic CI tests PASS (Windows + Ubuntu). **Live gateway router-mode validated** for JSON text chat, history-as-text, and 3 separate `conversation_id` responses. **SSE smoke CLI failed once despite a completed upstream reply; the client-side response-header casing issue has been fixed and awaits a repeat live smoke test.** **NOT YET verified through an actual 9Router process.** The user's previous local browser Gateway and `--require-session` live tests PASS. 9Router-specific flow still requires a controlled live smoke test.
 
 ## Objective, findings and design decision
 
@@ -124,3 +124,37 @@ Keep credentials under Git-ignored `.local/`, and treat provider data stored in 
 ## Sources for 9Router configuration
 
 9Router public docs and repository describe custom OpenAI-compatible provider nodes and local `/v1` integrations. The exact dashboard labels and model-prefix behavior may vary by version; source-code confirmation and live testing are needed before claiming complete 9Router integration.
+
+## 28 October 2026 — Live router-mode result and SSE smoke checker fix
+
+Researcher supplied real PowerShell results:
+
+```text
+check_router_compat.py           -> Models PASS; JSON PASS; reply OK
+check_router_compat.py --stream  -> Models PASS; generic smoke-test failure
+check_router_compat.py --history -> Models PASS; JSON PASS; reply ALPHA
+send_gateway_request.py --diagnostics
+  completed_replies: 3
+  same_conversation_pairs: 0
+  different_conversation_pairs: 2
+  last_relation: different
+```
+
+**Evidence:** Three AI replies were correlated, and three distinct consecutive WS `conversation_id` values occurred. JSON and history both worked live. The SSE command's error was **not** evidence that the ClickUp UI send or reply correlation failed: the diagnostics count included it.
+
+**Root cause found in the code:** The smoke client previously converted HTTP headers to a plain Python `dict(response.headers)`, then used `headers.get("X-Stream-Mode")`. HTTP header names are **case-insensitive**, while plain dictionary keys are case-sensitive. Uvicorn commonly serializes the server response as lowercase `x-stream-mode`. Thus the CLI incorrectly reported failure **after receiving a valid response**.
+
+**Patch:** `tools/check_router_compat.py` now lowercases response header names and checks `x-stream-mode` plus `content-type`. `tests/test_check_router_compat.py` drives the full CLI against a synthetic localhost HTTP server that deliberately sends lowercase headers, covering JSON, history and buffered SSE, on Windows and Linux.
+
+**Minimal retry without restarting a healthy browser gateway:**
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\check_router_compat.py --stream
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --diagnostics
+```
+
+`git pull` changes the CLI checker for the **next command invocation**, so this specific fix does not require a gateway restart. The `--stream` smoke test sends **one additional real prompt** and may use account credits. It should say `Buffered SSE: PASS (NOT real token-level streaming)`. If it still fails, investigate the actual response status/headers/SSE wire using a privacy-safe, allowlisted diagnostic, rather than assuming ClickUp returned no answer.
+
+**9Router itself is still untested.** The gateway can provide only buffered SSE from the observed reply-created event, and no tool calling/true token-level streaming; verify the installed 9Router build and the selected client before relying on it.
