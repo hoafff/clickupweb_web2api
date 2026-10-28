@@ -41,6 +41,14 @@ class FakeEngine:
     def is_ready(self):
         return self.ready
 
+    def session_diagnostics(self):
+        return {
+            "completed_replies": len(self.calls),
+            "same_conversation_pairs": 0,
+            "different_conversation_pairs": 0,
+            "last_relation": "unobserved",
+        }
+
     async def complete(self, prompt):
         self.calls.append(prompt)
         if self.error:
@@ -110,6 +118,16 @@ class GatewayHTTPTests(unittest.TestCase):
             }, json=VALID).status_code, 401
         )
         self.assertEqual(self.engine.calls, [])
+
+    def test_session_diagnostics_requires_bearer_and_never_exposes_ids(self):
+        self.assertEqual(
+            self.client.get("/v1/session/diagnostics").status_code, 401
+        )
+        response = self.client.get("/v1/session/diagnostics", headers=AUTH)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["completed_replies"], 0)
+        self.assertNotIn("conversation_id", response.text)
+        self.assertNotIn("ai_result_id", response.text)
 
     def test_models_only_advertises_browser_current_alias(self):
         no_auth = self.client.get("/v1/models")
@@ -260,6 +278,32 @@ class BrowserEngineIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first, "OK:one")
         self.assertEqual(second, "OK:two")
         self.assertEqual(self.engine.bridge.statistics()["matching_reply_comments"], 2)
+        diagnostics = self.engine.session_diagnostics()
+        self.assertEqual(diagnostics["completed_replies"], 2)
+        self.assertEqual(diagnostics["same_conversation_pairs"], 1)
+        self.assertEqual(diagnostics["different_conversation_pairs"], 0)
+        self.assertEqual(diagnostics["last_relation"], "same")
+        self.assertNotIn("test-chat", str(diagnostics))
+
+    async def test_observes_different_conversation_ids_without_exposing_them(self):
+        ids = iter([("first-ai", "first-private-conversation"),
+                    ("second-ai", "second-private-conversation")])
+
+        async def fake_send(page, prompt, composer_css, send_css):
+            aid, cid = next(ids)
+            self.engine.bridge.on_frame(start_event(aid, cid))
+            self.engine.bridge.on_frame(comment_event(aid, cid, "OK"))
+
+        with patch("tools.local_gateway._send_via_ui", side_effect=fake_send):
+            self.assertEqual(await self.engine.complete("one"), "OK")
+            self.assertEqual(await self.engine.complete("two"), "OK")
+        diagnostics = self.engine.session_diagnostics()
+        self.assertEqual(diagnostics["completed_replies"], 2)
+        self.assertEqual(diagnostics["same_conversation_pairs"], 0)
+        self.assertEqual(diagnostics["different_conversation_pairs"], 1)
+        self.assertEqual(diagnostics["last_relation"], "different")
+        self.assertNotIn("first-private-conversation", str(diagnostics))
+        self.assertNotIn("second-private-conversation", str(diagnostics))
 
     async def test_failed_send_marks_session_degraded_to_prevent_duplicate(self):
         async def fake_failure(page, prompt, composer_css, send_css):
