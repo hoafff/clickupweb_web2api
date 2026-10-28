@@ -203,3 +203,21 @@ git pull
 No request to ClickUp is sent and no account allowances are consumed. **Only share the integer-only JSON summary**, not the private JSONL trace. No tool should print raw event names, message text, user IDs, cookies, browser auth or file names.
 
 **Decision gate after v2:** If `chat_comment_edited_events` or relevant `other_ai_prefixed_events`/completion hints appear, examine whether they occur *after* AI reply creation using a separately designed, privacy-safe event-order comparison and targeted authorized UI observations. If all relevant buckets are zero, look for an independently observable **UI generation-in-progress state** rather than inventing `finish_reason=stop`. Do **not** automatically enable real token streaming, change the production Gateway reply selection, or infer the upstream protocol from event-name substrings alone.
+
+## 2026-10-28 — Live WS audit v2 and metadata-only timeline v3
+
+Actual private-trace v2 output from researcher: 602 JSONL records; 203 inbound WS frames; 8 AI starts; 16 created chat comments, of which 8 carry `ai_result_id` and 8 do not; **8 matching AI start/comment ID pairs, no unmatched IDs**; 13 `chatCommentEdited`, none with `ai_result_id` or a recognized changed `comment` field; 49 other chat-prefixed events; 90 uncategorized events; zero recognized terminal-event names or statuses.
+
+This validates the existing WS **reply-created correlation** on all 8 observed AI result IDs. It **does not validate an upstream end-of-generation marker**. The edited events cannot be attributed to individual AI replies using the ID fields observed, and timing proximity is not sufficient to make that attribution.
+
+The next optional offline study is `tools/audit_brain_event_timeline.py` (with synthetic fixture tests). It only outputs fixed-name aggregate counters and constant explanations. It counts: structure of edited-event payload/version changes; number of edits during pending AI starts or after any previous reply; timing buckets relative to the most recently observed AI reply; start-to-created latency buckets; and fixed lexical families for the 49 other chat-prefixed events. It NEVER prints unknown event names, opaque IDs, reply text, account information, or private timestamps.
+
+Run on PowerShell 2 (no Gateway or 9Router restart, no ClickUp credits):
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\audit_brain_event_timeline.py artifacts\brain_v3_private_content.jsonl
+```
+
+The v3 output has NOT yet been measured against this researcher's actual private trace. Share **only aggregate JSON output**; do not upload or paste the private JSONL. If events appear near the AI reply, it remains a hypothesis, and the subsequent engineering gate is a read-only, operator-verified UI generation-state observation. Do not advertise native streaming, `finish_reason=stop`, or unattended deployment based on temporal heuristics.
