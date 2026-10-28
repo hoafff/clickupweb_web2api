@@ -28,7 +28,7 @@ if __package__ in (None, ""):
     if str(_root) not in sys.path:
         sys.path.insert(0, str(_root))
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from playwright.async_api import Error as PlaywrightError, async_playwright
@@ -44,6 +44,9 @@ from tools.brain_start_url import (
     choose_start_url,
     normalize_brain_start_url,
     remember_start_url,
+)
+from tools.router_compat import (
+    RouterChatRequest, flatten_messages, make_chat_completion, make_buffered_sse,
 )
 from tools.session_lease import (
     ExclusiveSessionLease, SessionAlreadyClaimedError,
@@ -89,11 +92,17 @@ class ChatRequest(BaseModel):
 
 
 def create_app(
-    engine: PromptEngine, *, api_key: str, require_session: bool = False
+    engine: PromptEngine, *, api_key: str, require_session: bool = False,
+    router_mode: bool = False,
 ) -> FastAPI:
     """Build an app with an injectable engine for fully offline tests."""
     if len(api_key) < 24:
         raise ValueError("CLICKUP_GATEWAY_API_KEY must be at least 24 characters")
+    if router_mode and require_session:
+        raise ValueError(
+            "Router mode uses a dedicated isolated worker and cannot require "
+            "the custom owner header that router providers may omit."
+        )
     app = FastAPI(
         title="ClickUp Brain UI Bridge (local experimental facade)",
         docs_url=None, redoc_url=None, openapi_url=None,
@@ -177,22 +186,16 @@ def create_app(
         # No workspace/conversation/AI result identifiers leave the process.
         return engine.session_diagnostics()
 
-    @app.post("/v1/chat/completions", dependencies=[
-        Depends(require_api_key), Depends(require_owner),
-    ])
-    async def chat(request: ChatRequest) -> dict:
-        # Explicitly do not claim support for system prompts, prior messages,
-        # model switching, tools, images, token streaming or token usage.
+    async def run_one_prompt(text: str) -> str:
         if not engine.is_ready():
             raise HTTPException(
                 status_code=503,
                 detail="Browser session is not ready; open Brain UI first.",
             )
-        text = request.messages[0].content
         if not text.strip():
             raise HTTPException(status_code=422, detail="Message cannot be blank.")
         try:
-            answer = await engine.complete(text)
+            return await engine.complete(text)
         except GatewayBusyError as exc:
             raise HTTPException(status_code=429, detail="UI session is busy.") from exc
         except GatewayUnavailableError as exc:
@@ -207,19 +210,50 @@ def create_app(
                        "inspect browser and restart.",
             ) from exc
 
-        return {
-            "id": "chatcmpl-local-" + uuid4().hex,
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": MODEL_ID,
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": answer},
-                # A reply-created WS event is not a verified end-of-stream marker.
-                "finish_reason": None,
-            }],
-            # Deliberately no fabricated token usage.
-        }
+    if router_mode:
+        @app.post("/v1/chat/completions", dependencies=[
+            Depends(require_api_key),
+        ])
+        async def router_chat(request: RouterChatRequest):
+            # A multi-message Chat Completions request is self-contained. A
+            # fresh UI chat per request is MANDATORY to avoid cross-client
+            # context pollution; do not weaken this requirement.
+            if not getattr(engine, "new_chat_per_request", False):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Isolated new-chat browser worker required.",
+                )
+            try:
+                prompt = flatten_messages(request.messages)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Compiled text transcript exceeds allowed size.",
+                ) from exc
+            answer = await run_one_prompt(prompt)
+            if request.stream:
+                # Buffered SSE is format-compatibility ONLY: the whole reply
+                # arrives before frames are sent, no fabricated token deltas.
+                return Response(
+                    content=make_buffered_sse(answer),
+                    media_type="text/event-stream",
+                    headers={
+                        "X-Stream-Mode": "buffered",
+                        "Cache-Control": "no-store",
+                    },
+                )
+            return make_chat_completion(answer)
+    else:
+        @app.post("/v1/chat/completions", dependencies=[
+            Depends(require_api_key), Depends(require_owner),
+        ])
+        async def chat(request: ChatRequest) -> dict:
+            return {
+                **make_chat_completion(
+                    await run_one_prompt(request.messages[0].content)
+                ),
+                "id": "chatcmpl-local-" + uuid4().hex,
+            }
 
     return app
 
@@ -230,6 +264,7 @@ class LiveBrowserEngine:
     def __init__(
         self, *, profile: Path, url: str, timeout: float = 120,
         strict_conversation: bool = False,
+        new_chat_per_request: bool = False,
     ) -> None:
         self.profile = profile
         self.url = url
@@ -246,6 +281,7 @@ class LiveBrowserEngine:
         self._different_conversation = 0
         self._last_relation: str = "unobserved"
         self.strict_conversation = strict_conversation
+        self.new_chat_per_request = new_chat_per_request
 
     def is_ready(self) -> bool:
         return self._ready and not self._degraded and self._context is not None
@@ -324,8 +360,32 @@ class LiveBrowserEngine:
                 if parts.hostname != "app.clickup.com" or "/ai/brain" not in parts.path:
                     raise GatewayUnavailableError()
 
+                # Router mode receives independent, self-contained HTTP
+                # transcripts. A new UI conversation is required on EVERY call.
+                # This uses a previously verified Brain landing route, not an
+                # invented ClickUp backend endpoint or guessed New Chat button.
+                if self.new_chat_per_request:
+                    landing = normalize_brain_start_url(page.url)
+                    await page.goto(
+                        landing, wait_until="domcontentloaded", timeout=45_000
+                    )
+                    # Abort if ClickUp unexpectedly redirected to an existing
+                    # conversation, instead of claiming context isolation.
+                    location = urlsplit(page.url)
+                    if (
+                        location.query
+                        or normalize_brain_start_url(page.url) != landing
+                    ):
+                        raise GatewayUnavailableError(
+                            "Brain landing redirected to an existing conversation."
+                        )
+                    await page.locator(COMPOSER_CSS).wait_for(
+                        state="visible", timeout=20_000
+                    )
+                    self._last_conversation_id = None
+
                 # The current UI model/effort is selected manually before serving.
-                # History may persist between calls: NOT a stateless API guarantee.
+                # In legacy mode the browser retains chat context.
                 self.bridge.arm()
                 await _send_via_ui(page, prompt, COMPOSER_CSS, SEND_CSS)
                 reply = await self.bridge.await_reply_created(timeout=self.timeout)
@@ -388,6 +448,7 @@ async def serve(args: argparse.Namespace, api_key: str) -> None:
     async with LiveBrowserEngine(
         profile=profile, url=launch_url, timeout=args.timeout,
         strict_conversation=args.require_session,
+        new_chat_per_request=args.router_mode,
     ) as engine:
         print("Visible Chromium launched. Log in to your authorized Workspace.")
         print("Open ClickUp Brain Ask; select model and effort in the browser.")
@@ -409,7 +470,8 @@ async def serve(args: argparse.Namespace, api_key: str) -> None:
         print("Brain landing page remembered locally for next gateway start.")
         engine.mark_ready()
         app = create_app(
-            engine, api_key=api_key, require_session=args.require_session
+            engine, api_key=api_key, require_session=args.require_session,
+            router_mode=args.router_mode,
         )
         config = uvicorn.Config(
             app, host="127.0.0.1", port=args.port,
@@ -417,6 +479,10 @@ async def serve(args: argparse.Namespace, api_key: str) -> None:
         )
         print(f"LOCAL API ready at http://127.0.0.1:{args.port}")
         print("Only model=clickup-ui-current and one user message are supported.")
+        if args.router_mode:
+            print("9ROUTER BASIC MODE: isolated fresh Brain chat per request.")
+            print("SSE is buffered after the reply-created event; no real token stream.")
+            print("Only text, no native role hierarchy or tool calls.")
         if args.require_session:
             print("EXCLUSIVE MODE: POST /v1/session/claim first; "
                   "send X-ClickUp-Session on chat/diagnostics.")
@@ -440,6 +506,10 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--timeout", type=float, default=120)
     parser.add_argument(
+        "--router-mode", action="store_true",
+        help="Basic OpenAI-compatible text/SSE facade for one local 9Router provider",
+    )
+    parser.add_argument(
         "--require-session", action="store_true",
         help="Require a one-time API lease for the sticky browser conversation",
     )
@@ -452,6 +522,11 @@ def main() -> int:
         )
     if args.url is not None and not validate_clickup_app_url(args.url):
         parser.error("--url must be HTTPS app.clickup.com")
+    if args.router_mode and args.require_session:
+        parser.error(
+            "--router-mode and --require-session are mutually exclusive. "
+            "Router providers may not send X-ClickUp-Session."
+        )
     if not 1024 <= args.port <= 65535 or not 5 <= args.timeout <= 600:
         parser.error("--port must be 1024..65535 and --timeout 5..600 seconds")
     try:
