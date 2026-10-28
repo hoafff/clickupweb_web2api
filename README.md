@@ -673,3 +673,15 @@ A real 9Router connection screenshot returned `[422] {"detail":[{"type":"string_
 **Safety fix:** `tools/router_validation.py` sanitizes all HTTP 422 validation responses so FastAPI does not echo entire sensitive agent prompts or tool schemas through 9Router logs. Authorized `--diagnostics` exposes only aggregate numeric categories for oversized messages, unsupported tool calling/non-text, incompatible options and invalid requests. No automatic truncation, fake tool execution or relaxed UI safety limits. Changes require a **Gateway restart** after `git pull`, and counters start at zero; do not retry a permanently incompatible coding-agent prompt.
 
 **Use this provider for short text-chat only**. For Hermes repository editing/Ghidra coding, use an actual function/tool-calling model with sufficient context. See [Hermes 422 and agent compatibility (docs/22)](docs/22_HERMES_422_AGENT_COMPAT.md) for evidence, limitations, and steps.
+
+## 2026-10-28 — 40k-character ClickUp UI draft and experimental 50k Gateway text cap
+
+**Actual operator observation:** Approximately 40,000 characters were pasted into the **visible ClickUp Brain² composer**, and the UI remained responsive with a send control. This **does not** establish real 40k-character API submission, context retention or completed generation.
+
+**Local engineering finding:** The previous 8,000-character `RouterMessage` and compiled-transcript limits, plus the 7,600-character 9Router smoke-CLI limit, were **our own bridge guards**, not known ClickUp service limits. They explained prior `422 string_too_long` errors for large coding-agent prompts.
+
+**Implemented:** Experimental **50,000-character** shared *text only* budget in `tools/prompt_limits.py`; wired into `router_compat.py`, `local_gateway.py`, `send_gateway_request.py`, `check_9router_path.py`, and privacy-safe `router_validation.py`. Reject larger messages or flattened multi-role transcripts **before browser send**, with no auto-truncation and no leaked private 422 input. Synthetic tests exercise 40k Unicode messages, exact 50k boundary and 50k+ rejection.
+
+**Limitations unchanged:** system/developer roles are transcript text only, no native tool calls, no true token streaming, no verified upstream completion marker, and no cloud hosting. **This does not make Hermes a coding agent through ClickUp.** 50k is not a measured ClickUp product context window.
+
+After `git pull`, **restart the local Gateway** (only once the visible browser is idle) to load the new cap; leave 9Router running. No live 40k message must be sent merely to validate local changes. Evidence, safe offline tests and the operator-gated future live check: [docs/23_LARGE_PROMPT_CAPACITY.md](docs/23_LARGE_PROMPT_CAPACITY.md). Historical guidance about the old 8k cap elsewhere in this README describes prior versions, not the current default.
