@@ -250,7 +250,7 @@ class PythonGatewayClientTests(unittest.TestCase):
         self.assertNotIn(SECRET, proc.stdout)
 
     def test_empty_prompts_and_bad_diagnostics_rejected(self):
-        for prompt in ("", " ", "x" * 8001):
+        for prompt in ("", " ", "x" * 50001):
             with self.assertRaises(LocalClientError):
                 encode_request(prompt)
         with self.assertRaises(LocalClientError):
@@ -260,6 +260,22 @@ class PythonGatewayClientTests(unittest.TestCase):
                 "different_conversation_pairs": 1,
                 "last_relation": SECRET,
             })
+
+    def test_40k_utf8_prompt_encoding_and_50k_limit(self):
+        sample = ("Tiếng Việt gồm chữ cái và số 123. " * 1800)[:40000]
+        self.assertEqual(len(sample), 40000)
+        payload = encode_request(sample)
+        self.assertEqual(
+            json.loads(payload.decode("utf-8"))["messages"][0]["content"],
+            sample,
+        )
+        self.assertGreater(len(payload), len(sample))
+        self.assertEqual(
+            len(json.loads(encode_request("x" * 50000))["messages"][0]["content"]),
+            50000,
+        )
+        with self.assertRaisesRegex(LocalClientError, "50000"):
+            encode_request("x" * 50001)
 
     def test_missing_key_does_not_disclose_path(self):
         with self.assertRaises(LocalClientError) as cm:
