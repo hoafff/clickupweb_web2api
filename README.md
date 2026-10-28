@@ -295,7 +295,7 @@ Sau `git pull`, có thể dùng luôn helper cho PowerShell 5.1/7:
 .\tools\send_gateway_request.ps1 -Prompt 'Trả lời đúng một từ: OK'
 ```
 
-Script đọc key từ `.local/gateway.key`, không in key/prompt, truyền JSON UTF-8 dạng **byte array**; chỉ in nội dung câu trả lời. Nếu execution policy không cho chạy `.ps1`, dùng lệnh `$utf8Body` trực tiếp; không cần thay đổi policy toàn máy. Xem [troubleshooting đầy đủ](docs/15_LOCAL_HTTP_GATEWAY.md).
+Script đọc key từ `.local/gateway.key`, không in key/prompt, truyền JSON UTF-8 dạng **byte array**; chỉ in nội dung câu trả lời. Nếu execution policy không cho chạy `.ps1`, ưu tiên **Python client** bên dưới, hoặc dùng `$utf8Body` trực tiếp; không cần thay đổi policy toàn máy. Xem [troubleshooting đầy đủ](docs/15_LOCAL_HTTP_GATEWAY.md).
 
 
 ## Live Gateway E2E — VERIFIED (28/10/2026)
@@ -323,3 +323,21 @@ Invoke-RestMethod http://127.0.0.1:8787/v1/session/diagnostics -Headers $headers
 ```
 
 Đây là công cụ chuẩn bị cho kiểm thử **hai HTTP prompts liên tiếp**: check liệu WS `conversation_id` có giống nhau sau mỗi response, **không** kiểm chứng model nhớ nội dung. Endpoint đã kiểm tra mock; dữ liệu live cho multi-turn chưa có. Không công khai gateway hay profile.
+
+
+### Windows PowerShell `PSSecurityException` — Python client không cần .ps1
+
+Người nghiên cứu đã thử hai lệnh `.\tools\send_gateway_request.ps1`, nhưng Windows **chặn file script trước khi gửi HTTP** (`running scripts is disabled on this system`). `/v1/session/diagnostics` trả `completed_replies: 0, last_relation: unobserved` vì chưa có lượt nào gửi thành công trên tiến trình gateway vừa bật. Không phải lỗi ClickUp hoặc WebSocket.
+
+Đã bổ sung [`tools/send_gateway_request.py`](tools/send_gateway_request.py), Python stdlib client chỉ kết nối **127.0.0.1**, gửi JSON UTF-8 bytes, đọc app key từ `.local/gateway.key`, không in key hoặc raw payload. Dùng **PowerShell 2**, giữ gateway **PowerShell 1** tiếp tục chạy:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --prompt "Reply with the word ALPHA only."
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --prompt "What word did I ask you to say in my previous message?"
+.\.venv\Scripts\python.exe tools\send_gateway_request.py --diagnostics
+```
+
+Không dùng `Set-ExecutionPolicy` hoặc mở Terminal Administrator. Với gateway đang chạy, **không cần restart** chỉ vì thêm Python client. Chờ câu trả lời request 1 xong rồi mới gửi request 2. Diagnostics nếu có 2 phản hồi thành công sẽ cho biết `last_relation=same/different/unknown`; không trả conversation ID thật. Cùng `conversation_id` **không đồng nghĩa chứng minh trí nhớ model**. Nếu gateway trả 502 / 503, xem lại browser, không tự động gửi lại prompt vì nó có thể đã được submit.
