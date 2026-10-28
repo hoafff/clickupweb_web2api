@@ -1,6 +1,6 @@
 # 18 — 9Router / OpenAI-compatible Basic Text Mode
 
-**Status:** Implemented and synthetic CI tests PASS (Windows + Ubuntu). **Live gateway router-mode validated** for JSON text chat, history-as-text, and 3 separate `conversation_id` responses. **SSE smoke CLI failed once despite a completed upstream reply; the client-side response-header casing issue has been fixed and awaits a repeat live smoke test.** **NOT YET verified through an actual 9Router process.** The user's previous local browser Gateway and `--require-session` live tests PASS. 9Router-specific flow still requires a controlled live smoke test.
+**Status updated 2026-10-28:** **Live 9Router :20128 → Gateway :8787 → ClickUp Brain² JSON Chat Completions PASS** (one prompt, reply `OK`). Gateway-direct JSON, buffered SSE, history and distinct-chat tests also PASS live. **SSE/history through 9Router :20128 and long-response integrity still require live validation.** The user's previous local browser Gateway and `--require-session` live tests PASS. 9Router-specific flow still requires a controlled live smoke test.
 
 ## Objective, findings and design decision
 
@@ -247,3 +247,30 @@ npm list -g 9router --depth=0
 Historically some 9Router versions had localhost-authentication bypass issues (GHSA-86m2-fcxq-5q7c / CVE-2026-55641 and GHSA-5mj8-gf6m-fhw8 / CVE-2026-56681). Public advisories report fixes in recent releases; **do not assume the installed copy is patched without checking**. Restrict both processes to loopback, do not expose 20128 or 8787 on the LAN/public Internet, and maintain separate secrets for 9Router and the Brain Gateway. Relevant public advisories: https://github.com/advisories/GHSA-86m2-fcxq-5q7c and https://github.com/advisories/GHSA-5mj8-gf6m-fhw8.
 
 If running the CLI version of 9Router with an appropriate flag, prefer `9router --host 127.0.0.1` after checking the installed version's help. Do **not** change a functioning service's bind setting or upgrade npm mid-test without first securing its local dashboard configuration and reviewing the runtime.
+
+
+## Confirmed live 9Router route — key fix and remaining gates
+
+User confirmed `check_9router_path.py` outputs:
+
+```text
+9Router model discovery: PASS
+9Router -> Brain Gateway -> ClickUp: PASS
+Response: JSON (no true token-stream claim)
+Reply characters: 3
+Reply preview: OK
+```
+
+This occurred **after replacing** the incorrect 9Router caller key (`.local/ninerouter.key` previously contained the same value as `.local/gateway.key`) with a distinct **client key issued by the 9Router API Keys dashboard**. It validates one short, routed JSON request. It does **not** validate all advertised 9Router features or cloud hosting.
+
+After `git pull`, the updated `check_9router_path.py` supports `--stream`, `--history`, `--prompt`, and `--min-reply-chars` for the remaining live tests. The complete accepted evidence and commands are in [20 — 9Router Live JSON Acceptance](20_9ROUTER_LIVE_JSON_ACCEPTANCE.md).
+
+**Next acceptance tests:**
+
+```powershell
+.\.venv\Scripts\python.exe tools\check_9router_path.py --stream
+.\.venv\Scripts\python.exe tools\check_9router_path.py --history
+.\.venv\Scripts\python.exe tools\check_9router_path.py --prompt "Write five numbered sentences about HTTP and WebSocket, at least 15 words each." --min-reply-chars 200
+```
+
+Each command sends one real message and may consume upstream credits; do not run these tests in a loop. A length threshold does not prove an end-of-generation event was captured.
