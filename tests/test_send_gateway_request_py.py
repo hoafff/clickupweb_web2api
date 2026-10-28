@@ -153,6 +153,26 @@ class PythonGatewayClientTests(unittest.TestCase):
         self.assertNotIn(SECRET, json.dumps(output))
         self.assertNotIn("conversation_id", output)
 
+    def test_http_diagnostics_allowlist_returns_only_safe_numeric_counters(self):
+        source = {
+            "completed_replies": 4, "same_conversation_pairs": 0,
+            "different_conversation_pairs": 3, "last_relation": "different",
+            "http_chat_received": 5, "http_chat_2xx": 4,
+            "http_chat_401": 0, "http_chat_other_errors": 1,
+            "secret_workspace": SECRET, "authorization": SECRET,
+            "conversation_id": SECRET,
+        }
+        report = safe_diagnostics(source)
+        self.assertEqual(report["http_chat_received"], 5)
+        self.assertEqual(report["http_chat_other_errors"], 1)
+        self.assertNotIn(SECRET, json.dumps(report))
+        self.assertNotIn("secret_workspace", json.dumps(report))
+        self.assertEqual(len(report), 8)
+        for bad in (-1, True, "4", SECRET):
+            with self.subTest(bad=str(bad)[:12]):
+                with self.assertRaises(LocalClientError):
+                    safe_diagnostics({**source, "http_chat_2xx": bad})
+
     def test_exclusive_session_client_claim_and_local_owner_file(self):
         # Test file is inside a synthetic repo .local folder; never uses
         # the researcher's real account key or active browser profile.
