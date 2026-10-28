@@ -551,3 +551,20 @@ git pull
 ```
 
 If the trace file is missing, no additional action is required; never upload it to GitHub, ChatGPT, 9Router or CI. A zero candidate count is inconclusive. Detailed live acceptance: [docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md](docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md). Next goals remain verified completion state, controlled browser session recovery, and real tool-call interoperability rather than declaring a production-ready coding-agent backend.
+
+
+## WS completion research: 602 private trace records analyzed (2026-10-28)
+
+**Live local first-pass metadata:** 602 JSONL records, 203 inbound WS frames, 8 `aiConversationStarted`, 16 `chatCommentCreated`, 27 non-event inbound frames, 152 other events, 0 recognized terminal names/status values, 0 malformed records. This is **not** evidence that ClickUp has no terminal event. An AI start isn't the same as a completed AI response, and created comments can include user comments.
+
+**Source-audit finding:** earlier `brain_event_decoder.py` handles `chatCommentEdited` but first-pass `audit_brain_completion_metadata.py` counted only `chatCommentUpdated`. A zero updated count missed potential edited events.
+
+Added the **offline, read-only, privacy-safe second-pass** [`tools/audit_brain_completion_deep.py`](tools/audit_brain_completion_deep.py). It classifies those events and the remaining unknown family buckets and matches AI result IDs **only in memory**. Its output contains predefined numeric counters and constant interpretation text, not private prompts/IDs or arbitrary WS names. For the EXISTING authorized local trace:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\audit_brain_completion_deep.py artifacts\brain_v3_private_content.jsonl
+```
+
+No Gateway/9Router restart and no new ClickUp prompts are required. **Share only the aggregate JSON counters**, never the original `.jsonl` or browser profile. Whether `chatCommentEdited` occurs *after* the AI reply or signals completion still needs independent evidence. Do not change `finish_reason=null` or buffered-SSE behavior based on these heuristics. Detailed research log: [docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md](docs/20_9ROUTER_LIVE_JSON_ACCEPTANCE.md).
