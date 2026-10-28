@@ -18,10 +18,11 @@ import json
 from pathlib import Path
 import re
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 VALID_LABEL = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 KNOWN_EFFORTS = {"auto", "low", "medium", "high", "extra_high"}
-KNOWN_MODELS = {"brain", "claude-opus-5-5", "claude-opus-5",
+KNOWN_MODELS = {"auto", "brain", "claude-opus-5-5", "claude-opus-5",
                 "gemini-4-argon", "gpt-6.1-sol", "gpt-6.1-terra"}
 
 
@@ -79,6 +80,39 @@ def chat_command(url: str) -> str | None:
     if "/comments/comment/" in url:
         return "continue_chat_command"
     return None
+
+
+def extract_chat_wire_options(record: dict[str, Any]) -> dict[str, Any]:
+    """Read documented-from-trace query keys, emit whitelisted safe values only.
+
+    Values in `comment_type_data.query` may contain user or tenant-specific
+    secrets, so never return original query, AIToolId, URLs, or unknown values.
+    If a key is absent, show None (not an inferred default).
+    """
+    body = record.get("payload", {}).get("data")
+    if not isinstance(body, dict):
+        return {"selected_model": None, "selected_effort": None,
+                "query_keys": [], "has_ai_tool_id": False}
+    ct = body.get("comment_type_data")
+    query = ct.get("query") if isinstance(ct, dict) else None
+    if not isinstance(query, str) or len(query) > 4096:
+        return {"selected_model": None, "selected_effort": None,
+                "query_keys": [], "has_ai_tool_id": False}
+    try:
+        params = dict(parse_qsl(urlsplit(query).query, keep_blank_values=True, max_num_fields=40))
+    except (ValueError, TypeError):
+        params = {}
+    allowed_keys = {"shouldTriage", "createLink", "selectedModel",
+                    "selectedReasoningLevel", "AIToolId"}
+    model = params.get("selectedModel")
+    effort = params.get("selectedReasoningLevel")
+    return {
+        "selected_model": model if model in KNOWN_MODELS else None,
+        "selected_effort": effort if effort in KNOWN_EFFORTS else None,
+        "query_keys": sorted(set(params).intersection(allowed_keys)),
+        "has_ai_tool_id": "AIToolId" in params,
+        "selected_effort_present": "selectedReasoningLevel" in params,
+    }
 
 
 def _ws_event_name(record: dict[str, Any]) -> str | None:
@@ -162,6 +196,7 @@ def summarize(
                 summaries[i]["chat_commands"].append({
                     "command": command, "http_status": http_status.get(rid),
                     "request_outcome": http_outcomes.get(rid, "unknown"),
+                    "wire_options": extract_chat_wire_options(record),
                 })
         name = _ws_event_name(record)
         if name is not None:
@@ -247,7 +282,12 @@ def main() -> int:
     for phase in report["phases"][1:]:
         print(f"\n#{phase['index']} {phase['marker']}")
         for cmd in phase["chat_commands"]:
+            wire = cmd["wire_options"]
             print(f"  {cmd['command']} → HTTP {cmd['http_status']} ({cmd['request_outcome']})")
+            print("    request selectedModel="
+                  + str(wire["selected_model"] or "unknown")
+                  + ", selectedReasoningLevel="
+                  + str(wire["selected_effort"] or "(absent/unknown)"))
         print(f"  AI start events: {phase['ws_events'].get('aiConversationStarted', 0)}")
         if phase["generation_telemetry"]:
             print("  Generation telemetry (not model execution proof):")
