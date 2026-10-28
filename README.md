@@ -477,3 +477,20 @@ git pull
 If it reports `invalid_api_key`, check the **9Router API key issued from its Endpoints/API Keys page**, which is **different** from the upstream Gateway key saved in 9Router's custom provider connection. You can recreate the local `.local/ninerouter.key` (and only that file) using `Remove-Item .local\ninerouter.key` followed by `check_9router_path.py --save-key`.
 
 **More conclusive:** To use the new Gateway counters, stop/restart PowerShell 1's Gateway **after** `git pull`; run `send_gateway_request.py --diagnostics` before/after exactly one 9Router JSON request. If `http_chat_received` stays 0, 9Router rejected before forwarding; if it increments with `http_chat_401`, the **upstream connection key** in 9Router is wrong. Full commands, warnings and decision tree: [docs/19_9ROUTER_401_DIAGNOSTICS.md](docs/19_9ROUTER_401_DIAGNOSTICS.md). Current 9Router→Brain **chat** remains unverified, not PASS.
+
+
+### Khắc phục xác thực 9Router 401 khi dùng trùng key ở hai tầng
+
+**Đã xác định lỗi cấu hình phía client:** người nghiên cứu dùng đúng cùng một giá trị `.local/gateway.key` làm upstream API key trong provider Bulk của 9Router **và** downstream client key trong `.local/ninerouter.key`. 9Router chat báo `401 invalid_api_key`. Hai khóa có hai vai trò khác nhau: 9Router cần **phát hành client API key bằng chính dashboard của 9Router**; import upstream key không cấp quyền client tự động.
+
+Giữ nguyên upstream `.local/gateway.key` và browser profile. Vào 9Router (cổng 20128) → **API Keys / Endpoints → API Keys**, tạo và sao chép một **client key mới**, rồi chạy ở PowerShell 2:
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+Remove-Item .local\ninerouter.key
+.\.venv\Scripts\python.exe tools\check_9router_path.py --save-key
+.\.venv\Scripts\python.exe tools\check_9router_path.py
+```
+
+Tool sẽ dừng **trước khi gửi request** nếu hai file key vẫn trùng nhau và không in giá trị key. 9Router client key do dashboard cấp vẫn cần đúng tiến trình đang nghe tại `127.0.0.1:20128`. Xem [diagnostics chi tiết](docs/19_9ROUTER_401_DIAGNOSTICS.md).
