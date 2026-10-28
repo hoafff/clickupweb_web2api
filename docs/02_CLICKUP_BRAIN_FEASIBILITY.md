@@ -1,61 +1,68 @@
-# 02 — Đối chiếu ClickUp Brain²: bằng chứng, rủi ro, điều kiện
+# 02 — ClickUp Brain²: phạm vi, bằng chứng và giả thuyết giao thức
 
-**Cập nhật:** 28/10/2026. **Mức độ xác minh:** screenshot người dùng + tài liệu ClickUp công khai. Chưa có quan sát network (HAR) hoặc thử nghiệm API trên Workspace của người dùng.
+> **28/10/2026.** Người thực hiện cho biết có **ủy quyền nghiên cứu Web → API**. Tài liệu này chuyển từ quyết định “chờ official endpoint” sang **kế hoạch kiểm chứng thực nghiệm**, nhưng không nhận việc đã được ủy quyền là bằng chứng tự thân về nội dung/phạm vi chấp thuận. Cần ghi rõ scope của phía cấp quyền trong nhật ký nội bộ.
 
-## Những gì đã xác nhận
+## Quan sát đã có
 
-1. Screenshot cho thấy người dùng ở **app.clickup.com/.../ai/brain**, màn hình Brain²; ô Ask, Agents, Skills, Memory, recent chats; nút chọn model hiện **Max**. Không có endpoint AI chat backend nào hiển thị trong ảnh.
-2. Theo [ClickUp — Chat with Brain](https://help.clickup.com/hc/en-us/articles/28401383762455-Chat-with-Brain), model selector cho phép chọn Max hoặc các model cao cấp từ Claude, ChatGPT, Gemini; có context selector, mention và upload tài liệu.
-3. Theo [ClickUp — Select an AI model](https://help.clickup.com/hc/en-us/articles/30802296047511-Select-an-AI-model), có thể **chuyển model giữa cùng một cuộc trò chuyện**, giữ history/context. Đây là yêu cầu bắt buộc nếu muốn mô phỏng trải nghiệm người dùng; không thể chỉ có `model=clickup-max`.
-4. Theo [ClickUp — AI models, privacy and security FAQ](https://help.clickup.com/hc/en-us/articles/15428419095831-ClickUp-AI-models-privacy-and-security-FAQ), model và phiên bản thay đổi theo thời gian; menu model thể hiện **danh sách có sẵn thực tế trong Workspace**.
-5. Theo [ClickUp — Brain availability and limits](https://help.clickup.com/hc/en-us/articles/44297778247063-ClickUp-Brain-availability-and-limits), model standard/premium có hạn mức theo Workspace, giới hạn có thể thay đổi hành vi và mức sử dụng; không tự suy từ gói đăng ký.
-6. [ClickUp MCP Server](https://developer.clickup.com/docs/connect-an-ai-assistant-to-clickups-mcp-server) hỗ trợ thao tác data/tasks/docs với AI agent bên ngoài. **MCP này không đồng nghĩa một public endpoint cho Brain² chat/Max.**
+- Ảnh #1: URL `app.clickup.com/.../ai/brain`, Brain², Ask, Agents, Skills, Memory, recent chats và selector `Max`.
+- Ảnh #2: selector đang mở, thấy `Brain² Max`, `Claude Opus 5.5`, `Claude Opus 5`, `Gemini 4 Argon`, `GPT-6.1 Sol`, `GPT-6.1 Terra`, `Show more`. **Chưa quan sát các model bên dưới Show more.**
+- [ClickUp chọn AI model](https://help.clickup.com/hc/en-us/articles/30802296047511-Select-an-AI-model): có thể đổi model giữa một conversation, giữ conversation history và Workspace context.
+- [ClickUp Brain Help](https://help.clickup.com/hc/en-us/articles/28401383762455-Chat-with-Brain): có Skills, context/mentions và một số khả năng gắn attachment tùy model/plan.
+- Không ảnh nào chứa DevTools Network hoặc response body. **Chưa thể xác định URL endpoint, HTTP method, headers bắt buộc, body schema, event protocol hoặc stable model ID.**
 
-## Điều khoản cần xét trước mọi POC Web → API
+## Cơ chế phải bóc tách
 
-[ClickUp Terms of Service](https://clickup.com/terms) quy định:
-- Điều 1.5 hạn chế reverse engineering (trừ trường hợp pháp luật không cho phép áp dụng hạn chế).
-- Điều 2.2 hạn chế truy cập **private API** ngoài những cách được cho phép.
-- Điều 3.9 hạn chế crawling/scraping/truy cập tự động.
-- Điều 4.13(e) hạn chế API client không được cho phép.
+### 1. Vòng đời chat
 
-[Developer Terms](https://clickup.com/terms/developer-terms) cũng đặt giới hạn với platform/API. **Không khẳng định dự án này là chính thức hay được ClickUp phê duyệt.** Nếu muốn truy cập Brain² qua giao thức nội bộ, cần có chấp thuận có thể kiểm chứng; nếu chưa có thì không triển khai đường đó.
+Đo 4 lượt được lặp lại: (a) mở trang, (b) chat đầu với Max, (c) chat tiếp cùng hội thoại, (d) đổi model và chat tiếp. Gắn timestamp UI `T0`–`Tn` để so sánh với Network. Phân biệt request khởi tạo page, lấy workspace/memory, gửi prompt, stream phản hồi và lưu chat history.
 
-## Bảng chứng cứ / giả thuyết
+### 2. Model selection
 
-| Nội dung | Kết luận | Nguồn / cách kiểm chứng |
+Với mỗi label UI, so sánh **chỉ một biến** (model) giữa 2 lượt chat có cùng input vô hại. Phân tích thay đổi ở URL, JSON fields và header *không nhạy cảm*. Ghi rõ `selected_label`, `resolved_model_field` (nếu có), `response_reported_model` (nếu có), `fallback` và trạng thái kiểm chứng. **Không suy đoán Brain Max tương ứng model bên ngoài nào.**
+
+### 3. Conversation state
+
+Cần xác định có `conversation_id`, `message_id`, `parent_id`, `turn_id`, continuation cursor hoặc các token state khác hay không, bằng cách so sánh **schema đã loại dữ liệu nhạy cảm** của lượt #1/#2/new chat. Trạng thái cuộc chat gốc có thể nằm ở server, browser hoặc kết hợp. Không tự đặt tên field rồi tuyên bố giống thực tế.
+
+### 4. Streaming
+
+Phân loại `text/event-stream`, `application/x-ndjson`, `fetch` streaming binary, WebSocket hoặc polling từ bằng chứng. Với SSE: xác nhận event delimiter, fields, termination và error; với WebSocket: phân biệt frame server/client và message shapes; với fetch: chunk decoder. Đọc response với giới hạn an toàn và mask prompt/ID/token.
+
+### 5. Auth/session
+
+Đánh dấu loại auth (cookie/OAuth/CSRF/Bearer nếu giao thức thể hiện), thứ tự phát sinh và điều kiện hết hạn. Credential chỉ xử lý trong profile/secret store nội bộ được phép; **không đưa secret hoặc HAR gốc vào repository public**. Tracer mặc định **không lưu header hay body**.
+
+### 6. Workspace features
+
+Quan sát khả năng chọn context, Skills, Memory, Agents, upload file và deep mode. Không tự xem chúng là cùng một endpoint với text chat; mỗi khả năng cần matrix riêng và scope phù hợp.
+
+## Phân loại bằng chứng
+
+| Nút hỏi | Trạng thái | Bước kiểm chứng |
 |---|---|---|
-| Có nút Max trong Brain² | **Đã quan sát** | Screenshot |
-| Có nhiều model hơn Max | **Xác nhận theo tài liệu ClickUp và phản hồi người dùng** | Help Center model selector |
-| Model có thể đổi giữa cuộc chat | **Có, theo tài liệu** | Select an AI model |
-| Có public REST API dành cho việc chat trực tiếp với Brain² Max | **Chưa tìm thấy tài liệu hỗ trợ; không thể kết luận là không tồn tại** | ClickUp Developer Docs / cần xác nhận từ ClickUp |
-| Một backend request = một lần sinh AI | **Chưa xác minh** | Cần hợp đồng hoặc quan sát được phép |
-| Brain² dùng SSE / WebSocket | **Chưa xác minh** | Cần hợp đồng hoặc quan sát được phép |
-| Menu model có stable `model_id` gọi được từ bên ngoài | **Chưa xác minh** | Cần nguồn chính thức |
-| Brain² hỗ trợ upload, Skills, Memory, context | **Có thành phần UI / theo help**, API equivalence **chưa xác nhận** | Screenshot / help |
-| Dùng ClickUp MCP là gọi đúng Brain² Max | **Không** | MCP cung cấp tools cho external AI clients |
-| Chọn GPT/Claude/Gemini qua Brain = gọi provider API riêng có cùng hành vi | **Không** | Brain có Workspace context và tích hợp sản phẩm riêng |
+| Menu multi-model | UI-confirmed | Xem Show more và ghi label chính xác |
+| Model switch giữa chat | Documented | Test thủ công trong Workspace nghiên cứu |
+| Public chat REST API cho Brain² | Unknown | Tìm developer docs và hỏi nhà cung cấp |
+| Private request tạo chat tồn tại | Unknown | Browser DevTools request correlation |
+| Transport SSE/WS/JSON | Unknown | Network timeline + framing |
+| Stable model ID mapping | Unknown | Thử 2 model, diff payload |
+| Conversation ID/parent ID | Unknown | Diff first-turn vs continuation |
+| Auth refresh semantics | Unknown | Quan sát session hợp lệ và lỗi có kiểm soát |
+| Quota và server-side concurrency | Unknown | Xác nhận từ allowance/docs/traces, không stress vô hạn |
+| Brain Max là fixed provider | Unknown | Không suy diễn label thành provider ID |
 
-## Vì sao không được hứa “Web → API y như Brain²”
+## Kiểm soát phạm vi nghiên cứu
 
-- Max có thể là chế độ điều phối động và không phải một provider model tĩnh.
-- Chọn model trong UI không có nghĩa có model ID công khai hoặc quyền dùng model đó từ một proxy ngoài sản phẩm.
-- Skills, Memory, Mentions, Workspace context, attachments, tool execution có thể sử dụng nhiều thành phần nội bộ. Chỉ forward prompt sang một LLM khác **không tái hiện Brain²**.
-- Hạn mức của Workspace và gói có thể ảnh hưởng đến khả dụng/hiển thị của từng model; không đồng nhất với số lượng API tokens.
-- Trả model name mong muốn khi upstream thực chất dùng model khác là **sai tương thích và dễ làm người dùng hiểu nhầm**.
+Người dùng xác nhận được ủy quyền nghiên cứu. Điều đó **cho phép lập kế hoạch kỹ thuật**, thay vì chặn mọi phương án trực tiếp. Tuy nhiên [ClickUp Terms](https://clickup.com/terms) có điều khoản riêng về reverse engineering và private API: phạm vi ủy quyền cần được nhà cung cấp hoặc bên có đủ thẩm quyền xác lập; quyền sở hữu Workspace không tự động miễn trừ mọi điều khoản. Nghiên cứu không được giả định có quyền vượt scope, né anti-bot hay vượt quota.
 
-## Con đường hợp lệ được khuyến nghị
+Các ràng buộc không phải “giới hạn nhân tạo” được giữ lại: cô lập tài khoản/Workspace nghiên cứu, bảo vệ secrets, giới hạn tốc độ theo thực tế, lưu bằng chứng đã redacted, không công bố payload khách hàng và không làm gián đoạn dịch vụ.
 
-**MVP A — ClickUp MCP / Public REST API + LLM được người dùng cấp khóa riêng.** Cho phép query task/doc, tổng hợp, tạo tác vụ trong phạm vi OAuth/scopes được cấp; hỗ trợ nhiều model tùy provider, và thông báo rõ đây là **AI sử dụng dữ liệu ClickUp**, không phải “ClickUp Brain² API”.
+## Tiêu chí hoàn tất feasibility
 
-**Track B — Chờ xác nhận từ ClickUp** về endpoint Brain chat/SDK/partner access hoặc văn bản cho phép tự động hóa; sau đó mới viết provider adapter vào một giao thức **có phạm vi được phép rõ ràng**.
+- Có mapping UI action → request → response bằng quan sát thực tế.
+- Có ít nhất 2 model được đo (Max + 1 model ngoài) và một hội thoại chuyển model.
+- Có schema redacted và mẫu nhận dạng transport, end-of-stream, lỗi, metadata.
+- Có giả thuyết session được đánh dấu đã chứng minh/bác bỏ.
+- Có quyết định kỹ thuật rõ: `browser-ui-adapter`, `protocol-adapter` hoặc `official-api-fallback` dựa trên bằng chứng và phạm vi sử dụng được phép.
 
-## Câu hỏi cần gửi ClickUp (không cần dữ liệu bí mật)
-
-1. Có API hoặc partner SDK **được hỗ trợ** để gửi prompt đến Brain², bao gồm Max / lựa chọn model ngoài và nhận câu trả lời không?
-2. Có API hỗ trợ continuation, model switch mid-chat, memory, Workspace context, Skills, file upload và streaming không?
-3. Nếu không, những kiểu automation nào được phép và trên môi trường nào?
-4. Quy tắc quota/premium model allowance, rate limit và điều kiện triển khai server-side?
-5. Chính sách lưu log, dữ liệu Workspace và yêu cầu cấp quyền OAuth/app?
-
-**Trạng thái:** Chưa trả lời từ ClickUp; không lấy sự im lặng làm sự cho phép.
+Kết quả triển khai đầu tiên sẽ là **research tooling + evidence**, chưa tự gắn nhãn “ClickUp Brain API hoạt động” cho tới khi đã test.
