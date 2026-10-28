@@ -209,3 +209,19 @@ git pull
 ```
 
 Mở đúng ClickUp Brain UI, nhấn ENTER trong terminal. Tool in `visible_editors` và `nearby_buttons` kèm vị trí `rect`, `aria-label`, `placeholder`, `data-testid` và CSS selector được kiểm tra unique. **Không tự động gửi tin nhắn.** User cần kiểm tra lại selector trong trình duyệt trước khi dùng `browser_adapter.py --mode auto --confirm-send`. Không gửi browser profile, cookie hoặc dữ liệu workspace riêng tư.
+
+
+### Ghi nhận editor/Send sau khi có bản nháp (hai lần đọc DOM)
+
+Kết quả inspector từ người nghiên cứu: editor duy nhất `div[contenteditable="true"]` (`stable=false`), model dropdown có `data-test="content-assistant-model-selector-dropdown__trigger"`. **Send chưa xuất hiện khi ô nhập trống**. Không dùng nút micro, attachment hay model dropdown làm Send.
+
+Chế độ mới **không gửi tin, không đọc prompt**. Đóng Chromium cũ, chạy:
+
+```powershell
+git pull
+.\.venv\Scripts\python.exe tools\inspect_brain_ui.py --after-draft
+```
+
+Nhấn Enter trong **PowerShell** lần 1 khi editor trống. Gõ `OK` trong editor của **Chromium**, **đừng Enter/click Send trên web**. Quay lại PowerShell nhấn Enter lần 2. Chỉ gửi output của `difference`, `visible_editors` và `nearby_buttons_after_draft` đã kiểm tra dữ liệu riêng tư. Tool so sánh nút mới xuất hiện/nút được enable, vẫn phải xác minh icon Send bằng mắt.
+
+`_send_via_ui()` cũng đã được sửa để **điền prompt trước rồi mới chờ nút Send hiện lên**, và từ chối click khi selector không đúng duy nhất/visible/enabled. Auto-send chưa được xác thực live.
