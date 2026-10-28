@@ -134,3 +134,15 @@ Muốn xuất JSON tổng hợp **không có prompt, conversation ID, token và 
 ```
 
 Kết quả `brain_v3_analysis.json` chứa mỗi pha `#1 ... #8` với HTTP status, event name counts và giá trị `model/effort` đã whitelist, **không** chứa payload gốc. Bản private log V3 đã cung cấp vẫn có thể chứa session/analytics identifiers; giữ private và không commit. Tracer từ bản cập nhật đã tăng che `writeKey`, `session_id`, `sessionId`.
+
+
+## V3 — Reconstruct reply text from WebSocket (offline)
+
+[Validated event parser and privacy-preserving findings](docs/11_V3_REPLY_EVENT_DECODING.md): correlate `aiConversationStarted` with `chatCommentCreated` by `ai_result_id`, confirm matching `conversation_id`, and decode the rich-text JSON string `comment` in `version_event_data.changes[].after`.
+
+```powershell
+git pull
+.\.venv\Scripts\python.exe tools\brain_event_decoder.py artifacts\brain_v3_private_content.jsonl
+```
+
+The default command prints only event counts, reply lengths and event-to-event timing, no prompt or IDs. For authorized local inspection only, add `--export-replies artifacts\brain_v3_local_replies.json` to write actual text to a **private ignored file**. Do not commit or share this file. The 8/8 reply matches from the V3 trace do **not** establish streaming-delta or a runnable standalone upstream API.
