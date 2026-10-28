@@ -242,6 +242,24 @@ class BrowserEngineIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(GatewayUnavailableError):
             await self.engine.complete("try again")
 
+    async def test_cancelled_request_disables_further_ui_sends(self):
+        started = asyncio.Event()
+        blocker = asyncio.Event()
+
+        async def fake_send(page, prompt, composer_css, send_css):
+            started.set()
+            await blocker.wait()
+
+        with patch("tools.local_gateway._send_via_ui", side_effect=fake_send):
+            task = asyncio.create_task(self.engine.complete("first"))
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertFalse(self.engine.is_ready())
+            with self.assertRaises(GatewayUnavailableError):
+                await self.engine.complete("second")
+
     async def test_concurrent_requests_fail_fast(self):
         started = asyncio.Event()
         release = asyncio.Event()
