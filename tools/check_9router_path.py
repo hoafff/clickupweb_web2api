@@ -284,6 +284,11 @@ def main(argv: list[str] | None = None) -> int:
         "--min-reply-chars", type=int, default=0,
         help="Fail if response is shorter than N characters (long-answer smoke test)",
     )
+    p.add_argument(
+        "--expect-suffix", default=None,
+        help="Require reply to end with a specific test marker; not proof "
+             "of upstream generation completion",
+    )
     p.add_argument("--models-only", action="store_true", help="List model IDs without sending a prompt")
     p.add_argument("--save-key", action="store_true", help="Prompt for and store 9Router client key privately")
     p.add_argument("--key-file", type=Path, default=KEY_FILE)
@@ -296,6 +301,14 @@ def main(argv: list[str] | None = None) -> int:
             raise RouterPathError("Invalid prefixed 9Router model name.")
         if not 0 <= args.min_reply_chars <= 100_000:
             raise RouterPathError("--min-reply-chars must be 0..100000.")
+        if args.expect_suffix is not None and (
+            not args.expect_suffix
+            or len(args.expect_suffix) > 100
+            or any(ord(ch) < 32 or ord(ch) > 126 for ch in args.expect_suffix)
+        ):
+            raise RouterPathError(
+                "--expect-suffix must be 1..100 printable ASCII characters."
+            )
         key = read_key(args.key_file)
         # Model discovery may be public. Enforce auth-role safety specifically
         # before CHAT dispatch so --models-only still helps diagnosis.
@@ -334,7 +347,17 @@ def main(argv: list[str] | None = None) -> int:
                 "9Router delivered a response shorter than the requested "
                 "minimum; do not treat this long-answer test as PASS."
             )
+        if args.expect_suffix is not None:
+            # A marker is only an integration smoke check. It cannot prove
+            # that the upstream UI emitted a final generation signal.
+            if not answer.rstrip().endswith(args.expect_suffix):
+                raise RouterPathError(
+                    "Expected response suffix was not observed; investigate "
+                    "possible incomplete reply or model noncompliance."
+                )
         print("9Router -> Brain Gateway -> ClickUp: PASS")
+        if args.expect_suffix is not None:
+            print("Expected response suffix observed (NOT a final generation signal).")
         print("Response:", "SSE" if args.stream else "JSON", "(no true token-stream claim)")
         print("Reply characters:", len(answer))
         print("Reply preview:", answer[:120].replace("\r", " ").replace("\n", " "))
