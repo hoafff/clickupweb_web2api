@@ -221,3 +221,51 @@ Then inspect the already-existing 9Router request log at the approximate time th
 ### Follow-up engineering hypothesis
 
 Because `--drive-router` sent one explicit prompt but Gateway reported two POSTs since process start, inspect whether 9Router has an existing probe/retry, a separate earlier call, or overlapping clients. Two POSTs in a cumulative counter do **not** prove 9Router retried the same request. A request log timestamp/status or safe per-request tracing is needed. The durable fix should be based on that evidence rather than inflating timeouts or disabling concurrency protections.
+
+## 2026-10-28 — Controlled live rerun PASS: 1,611-character answer and full Stop control cycle
+
+**Actual researcher-supplied PowerShell output after Gateway restart (with fresh HTTP status counters):**
+
+```text
+--snapshot (idle):
+  page_is_brain=true; composer_visible=true; stop_near_composer_count=0
+
+--drive-router --samples 360 --interval 0.5:
+  samples=43; failed_samples=0; different_snapshot_shapes=10
+  stop_near_composer_count_nonzero_samples=19
+  stop_appearance_transitions=1; stop_disappearance_transitions=1
+  stop_visible_first_sample=false; stop_visible_last_sample=false
+  router_request_elapsed_seconds=20.12
+  router_request_outcome=success
+  router_reply_characters=1611
+  post_request_snapshot_ok=true
+  post_request_stop_near_composer=false
+  post_request_composer_visible=true
+
+--diagnostics (same process):
+  completed_replies=1
+  http_chat_received=1
+  http_chat_2xx=1
+  http_chat_other_errors=0
+  http_chat_401=0
+  http_chat_422=0; http_chat_429=0
+  http_chat_502=0; http_chat_503=0
+```
+
+**Acceptance:** One actual request through **9Router :20128 → Gateway :8787 → Playwright → ClickUp Brain²** returned **1611 characters in 20.12 seconds**, with one Gateway HTTP 2xx, zero Gateway HTTP errors, and no UI metadata polling errors. A Stop-like control was observed absent → present → absent at least once, and no Stop-like control was visible when the HTTP client finished and a subsequent snapshot was taken.
+
+**What is NOT proven:** This single successful rerun does not explain why an earlier long request failed or prove all future long requests will succeed. The previous event stream and initial research probe lacked a verified terminal inference event. The old failure's exact HTTP status remains unknown. The new Stop sequence establishes a **candidate UI indicator**, but previously the watcher did not record which samples occurred *before versus after* the final 9Router HTTP response; its post-request samples can make the apparent Stop exit occur after HTTP return.
+
+### New non-invasive research measurement: Stop control timing vs HTTP client return
+
+Updated the existing `tools/check_brain_ui_state.py` with:
+
+- `stop_disappearance_before_router_return` and `stop_visible_last_sample_before_router_return`: compare Stop hints sampled **before** the Python 9Router client call returned.
+- `ui_samples_before_router_return`, `ui_samples_after_router_return` and `stop_seen_after_router_return`: explicitly account for the post-request watcher tail.
+- `router_reply_has_expected_suffix`: compare the in-memory answer's trailing text against the already-requested, harmless `UI_RESEARCH_END` marker. Only a boolean and length are printed; actual reply text remains private.
+
+Tests use simulated metadata/return boundaries and fake strings, including a secret-leakage assertion. **This diagnostic has not yet been run on the live browser with the new timing fields.** It does not modify `LiveBrowserEngine.complete`, `BrainBrowserBridge.await_reply_created`, `finish_reason=null` or buffered SSE.
+
+**Next action:** No additional AI invocation is required to accept the current 1,611-character success. After `git pull`, the updated CLI will show the extra fields on **future optional** `--drive-router` tests (at most one real request each, no auto-retry). Even a Stop disappearance observed before the 9Router response is evidence about UI controls, **not definitive proof of an upstream generation-completed event**.
+
+**Engineering next priorities:** reproducible evidence about end-state (UI vs WS), session recovery after browser navigation/logout, handling ambiguous post-send failures without retries, then tool-call interoperability. Basic localhost text routing is live operational, but neither cloud hosting nor coding-agent compatibility has been established.
