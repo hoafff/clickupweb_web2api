@@ -13,8 +13,11 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from tools.send_gateway_request import (
+    load_session_token,
+    write_session_token_once,
     LocalClientError,
     encode_request,
     get_answer,
@@ -42,6 +45,20 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
+        if self.path == "/v1/session/claim":
+            self.server.received.append({
+                "method": "POST",
+                "path": self.path,
+                "authorization": self.headers.get("Authorization"),
+            })
+            if self.headers.get("Authorization") != f"Bearer {KEY}":
+                self.send_json(401, {"detail": SECRET})
+                return
+            self.send_json(200, {
+                "object": "browser.session",
+                "session_token": "synthetic-owner-token-at-least-32-characters",
+            })
+            return
         if self.path != "/v1/chat/completions":
             self.send_json(404, {"detail": "not found"})
             return
@@ -50,6 +67,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.server.received.append({
             "method": "POST",
             "authorization": self.headers.get("Authorization"),
+            "owner": self.headers.get("X-ClickUp-Session"),
             "content_type": self.headers.get("Content-Type"),
             "raw": raw,
         })
@@ -134,6 +152,28 @@ class PythonGatewayClientTests(unittest.TestCase):
         self.assertEqual(output["last_relation"], "same")
         self.assertNotIn(SECRET, json.dumps(output))
         self.assertNotIn("conversation_id", output)
+
+    def test_exclusive_session_client_claim_and_local_owner_file(self):
+        # Test file is inside a synthetic repo .local folder; never uses
+        # the researcher's real account key or active browser profile.
+        test_root = Path(self.tmp.name)
+        owner_file = test_root / ".local" / "owner.key"
+        with patch("tools.send_gateway_request.PROJECT_ROOT", test_root):
+            claim = request_json(
+                port=self.port, key=KEY, path="/v1/session/claim", timeout=5,
+            )
+            write_session_token_once(owner_file, claim["session_token"])
+            token = load_session_token(owner_file)
+            with self.assertRaises(LocalClientError):
+                write_session_token_once(owner_file, claim["session_token"])
+        answer = request_json(
+            port=self.port, key=KEY, path="/v1/chat/completions",
+            body=encode_request("Reply OK"), timeout=5,
+            session_token=token,
+        )
+        self.assertEqual(get_answer(answer), "OK")
+        self.assertEqual(self.server.received[-1]["owner"], token)
+        self.assertNotIn(token, json.dumps(answer))
 
     def test_invalid_key_never_echoes_server_response_body(self):
         with self.assertRaises(LocalClientError) as cm:
