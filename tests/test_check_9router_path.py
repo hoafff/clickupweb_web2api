@@ -176,6 +176,28 @@ class RouterPathTests(unittest.TestCase):
             "Write 3 sentences.",
         )
 
+    def test_end_marker_option_checks_suffix_without_fake_completion(self):
+        accepted = self.run_cli("--expect-suffix", "OK")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertIn("Expected response suffix observed", accepted.stdout)
+        self.assertIn("NOT a final generation signal", accepted.stdout)
+        self.server.requests.clear()
+        rejected = self.run_cli("--expect-suffix", "END_OF_RESPONSE")
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("Expected response suffix was not observed", rejected.stderr)
+        self.assertNotIn(KEY, rejected.stderr)
+        # The test did submit to the mock; the rejection is an output
+        # acceptance check, not a network or authentication failure.
+        self.assertEqual(len(self.server.requests), 1)
+
+    def test_invalid_suffix_does_not_send_request(self):
+        for marker in ("", "bad\\nmarker", "x" * 101):
+            with self.subTest(marker=marker[:15]):
+                rejected = self.run_cli("--expect-suffix", marker)
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertIn("printable ASCII", rejected.stderr)
+        self.assertEqual(self.server.requests, [])
+
     def test_rejects_invalid_prompt_before_chat_dispatch(self):
         result = self.run_cli("--prompt", " " * 3)
         self.assertNotEqual(result.returncode, 0)
