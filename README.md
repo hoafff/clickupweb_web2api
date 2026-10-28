@@ -43,7 +43,8 @@ Vẫn giữ kỹ thuật bảo vệ: không commit secret/cookie/HAR nguyên b�
 5. [05 — Multi-model](docs/05_MULTI_MODEL_SUPPORT.md): dynamic discovery, menu model, switching.
 6. [06 — Authorized protocol research](docs/06_AUTHORIZED_PROTOCOL_RESEARCH.md): phương pháp quan sát request/response theo từng lượt chat.
 7. [Web public findings](docs/07_PUBLIC_WEB_FINDINGS.md): phân biệt ClickUp Chat API, MCP, Brain² và giới hạn truy cập frontend.
-8. [Browser network tracer](tools/trace_browser.py): ví dụ tracer theo dõi metadata đã ẩn thông tin nhạy cảm; chạy trên browser profile riêng.
+8. [Phân tích trace 28/10](docs/08_TRACE_ANALYSIS_2026-10-28.md): số liệu thực nghiệm, request comment-service, realtime WebSocket và các giả thuyết cần kiểm chứng.
+9. [Browser network tracer](tools/trace_browser.py): ví dụ tracer theo dõi metadata đã ẩn thông tin nhạy cảm; chạy trên browser profile riêng.
 
 ## Quick start — quan sát phiên Browser
 
@@ -71,3 +72,18 @@ Trình duyệt mở ở chế độ nhìn thấy được. Đăng nhập bằng 
 ## Nguồn
 
 [ClickUp chọn model](https://help.clickup.com/hc/en-us/articles/30802296047511-Select-an-AI-model) · [Playwright network](https://playwright.dev/python/docs/network) · [MDN SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events) · [ClickUp Terms](https://clickup.com/terms)
+
+
+## Trace v2 (đổi model theo mốc đánh dấu)
+
+```powershell
+# Chỉ chạy từ phiên profile nghiên cứu; tự đăng nhập bằng tài khoản được ủy quyền
+python tools/trace_browser.py --url https://app.clickup.com/ --capture-ws-schema --output artifacts/brain_v2.jsonl
+# Terminal sau khi browser mở: "mark max_first" (Enter) rồi gửi prompt UI
+# Tiếp theo: "mark max_followup" rồi gửi prompt trong cùng hội thoại
+# Tiếp theo: "mark opus_switch" rồi chọn Opus và gửi prompt
+# Nhấn Enter ở terminal để kết thúc
+python tools/summarize_trace.py artifacts/brain_v2.jsonl --json
+```
+
+`--capture-ws-schema` là tùy chọn: chỉ lưu **JSON key paths** của WebSocket frame, không lưu giá trị/body. Đã tăng cường mask segment chữ+số dạng opaque IDs trong URL. Marker cho phép liên kết request sau mỗi lần tương tác UI. **Không đẩy file trace hay browser profile lên repo public.**
