@@ -20,6 +20,13 @@ from typing import Any
 import urllib.error
 import urllib.request
 
+if __package__ in (None, ""):
+    _root = Path(__file__).resolve().parents[1]
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+
+from tools.prompt_limits import MAX_PROMPT_CHARS
+
 ROOT = Path(__file__).resolve().parents[1]
 KEY_FILE = ROOT / ".local" / "ninerouter.key"
 GATEWAY_KEY_FILE = ROOT / ".local" / "gateway.key"
@@ -245,8 +252,8 @@ def chat_once(*, model: str, port: int, key: str | None,
               stream: bool = False, prompt: str = DEFAULT_TEST_PROMPT,
               history: bool = False) -> tuple[str, str]:
     """Test a single text prompt or a complete small history through 9Router."""
-    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 7600:
-        raise RouterPathError("Prompt must be 1..7600 non-blank characters.")
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > MAX_PROMPT_CHARS:
+        raise RouterPathError(f"Prompt must be 1..{MAX_PROMPT_CHARS} non-blank characters.")
     if history:
         messages = [
             {"role": "system", "content": "Respond concisely to the final user turn."},
