@@ -1,6 +1,6 @@
 # 15 — Local HTTP Gateway POC over ClickUp Brain Browser Adapter
 
-**Status (2026-10-28):** Local JSON API code and offline mock/integration tests available. **The researcher has confirmed live Playwright auto-send (1/1 `OK`) before this gateway implementation.** The **HTTP gateway itself has NOT YET been tested end-to-end against a live ClickUp session**. This is a localhost research prototype and **not cloud-hosted or an official/direct ClickUp API**.
+**Status (2026-10-28):** Local JSON API code and offline mock/integration tests available. **The researcher has confirmed live Playwright auto-send (1/1 `OK`) before this gateway implementation.** The **HTTP gateway has now been tested successfully end-to-end against a live ClickUp session** using an explicit UTF-8 request body; terminal output was `OK`. This is a localhost research prototype and **not cloud-hosted or an official/direct ClickUp API**.
 
 ## 1. Objective / evidenced constraints
 
@@ -143,7 +143,7 @@ The body parse error occurs before the `chat` handler calls Playwright; it shoul
 
 | Feature | Current behavior |
 |---|---|
-| `POST /v1/chat/completions` JSON | Implemented; real HTTP→UI→WS still unverified |
+| `POST /v1/chat/completions` JSON | **Live E2E PASS** for one request with one Vietnamese prompt; durability/scale unverified |
 | `GET /v1/models` | Returns only `clickup-ui-current` |
 | Auth | Local Bearer key, minimum 24 chars, constant-time compare |
 | Model/effort | **Current selection in ClickUp UI**; no automatic switching |
@@ -174,7 +174,25 @@ Run:
 
 ## 7. Next priority after live HTTP test
 
-- Validate one real `Invoke-RestMethod` request returns the Brain reply.
+- **DONE**: One live `Invoke-RestMethod` request with UTF-8 bytes returned `OK` through the browser and WebSocket.
 - Confirm second request behavior (same conversation vs new) before advertising OpenAI multi-turn semantics.
 - Validate model selection and reasoning effort via UI controls; do **not** invent a `model_id` contract from telemetry alone.
 - Build session lifecycle/re-auth and secure worker isolation **before** considering a cloud/VPS deployment. Any public deployment would need additional security review and confirmation of the service's permitted use.
+
+
+## 8. Live localhost HTTP acceptance result — PASS
+
+**Observation reported by researcher on 28 October 2026** (no raw HTTP body, browser profile, credentials or workspace IDs shared):
+
+```text
+LOCAL API ready at http://127.0.0.1:8787
+Invoke-RestMethod (original string -Body) -> JSON parsing error
+Invoke-RestMethod (UTF-8 byte[] -Body) -> no HTTP error
+$response.choices[0].message.content -> OK
+```
+
+Verified local path: bearer-authenticated `POST /v1/chat/completions` → FastAPI → browser UI input/send → WebSocket reply correlation → JSON completion `choices[0].message.content="OK"`.
+
+**Evidence limits:** The prompt was a short single user message and model/effort selection was done manually in the UI. We did not observe the full HTTP JSON response in the supplied terminal excerpt, nor an end-of-generation signal, token accounting, multi-turn isolation, restart/re-auth, headless Chrome, cloud deployment or any remote client. Treat all those as **TODO / UNVERIFIED**. The original request bytes causing JSON parsing failure were not captured, so the exact encoding root cause remains an informed hypothesis; explicit UTF-8 is a confirmed workaround.
+
+Next gates: [16 — acceptance and cloud-readiness](16_LIVE_HTTP_ACCEPTANCE_AND_DEPLOYMENT_GATES.md).
