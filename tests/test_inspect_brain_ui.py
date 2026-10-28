@@ -4,7 +4,12 @@ import subprocess
 import sys
 import unittest
 
-from tools.inspect_brain_ui import PROBE_JS, select_brain_page, valid_clickup_url
+from tools.inspect_brain_ui import (
+    PROBE_JS,
+    candidate_changes,
+    select_brain_page,
+    valid_clickup_url,
+)
 
 
 class FakePage:
@@ -55,6 +60,41 @@ class UiInspectorTests(unittest.TestCase):
         self.assertIn("querySelectorAll", PROBE_JS)
         self.assertIn("aria-label", PROBE_JS)
         self.assertIn("data-testid", PROBE_JS)
+
+    def test_newly_visible_send_and_enabled_controls(self):
+        before = {"nearby_buttons": [
+            {"css": "button[data-test='model']", "disabled": False},
+            {"css": "button[data-test='send']", "disabled": True},
+        ]}
+        after = {"nearby_buttons": [
+            {"css": "button[data-test='model']", "disabled": False},
+            {"css": "button[data-test='send']", "disabled": False},
+            {"css": "button[data-test='new-send']", "disabled": False},
+        ]}
+        changes = candidate_changes(before, after)
+        self.assertEqual(changes["nearby_count_before"], 2)
+        self.assertEqual(changes["nearby_count_after"], 3)
+        self.assertEqual(
+            [x["css"] for x in changes["newly_visible_buttons"]],
+            ["button[data-test='new-send']"],
+        )
+        self.assertEqual(
+            [x["css"] for x in changes["newly_enabled_buttons"]],
+            ["button[data-test='send']"],
+        )
+
+    def test_two_pass_never_dumps_prompt_or_guesses_send(self):
+        before = {"nearby_buttons": []}
+        after = {"nearby_buttons": [
+            {"css": "button[data-test='unknown']", "disabled": False},
+        ]}
+        report = candidate_changes(before, after)
+        self.assertNotIn("prompt", str(report))
+        self.assertIn("Confirm the Send icon visually", report["hint"])
+        self.assertIn("nearEditorRadius", PROBE_JS)
+        self.assertIn("disabled", PROBE_JS)
+        self.assertNotIn("click(", PROBE_JS)
+        self.assertNotIn("fill(", PROBE_JS)
 
     def test_cli_help_windows_direct_module_mode(self):
         root = Path(__file__).resolve().parents[1]
