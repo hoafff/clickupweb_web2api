@@ -62,6 +62,7 @@ class GatewaySendError(Exception):
 class PromptEngine(Protocol):
     def is_ready(self) -> bool: ...
     async def complete(self, prompt: str) -> str: ...
+    def session_diagnostics(self) -> dict: ...
 
 
 class ChatMessage(BaseModel):
@@ -116,6 +117,11 @@ def create_app(engine: PromptEngine, *, api_key: str) -> FastAPI:
                 "owned_by": "local-browser-session",
             }],
         }
+
+    @app.get("/v1/session/diagnostics", dependencies=[Depends(require_api_key)])
+    def session_diagnostics() -> dict:
+        # No workspace/conversation/AI result identifiers leave the process.
+        return engine.session_diagnostics()
 
     @app.post("/v1/chat/completions", dependencies=[Depends(require_api_key)])
     async def chat(request: ChatRequest) -> dict:
@@ -175,9 +181,44 @@ class LiveBrowserEngine:
         self._degraded = False
         self._playwright = None
         self._context = None
+        self._last_conversation_id: str | None = None
+        self._completed_replies = 0
+        self._same_conversation = 0
+        self._different_conversation = 0
+        self._last_relation: str = "unobserved"
 
     def is_ready(self) -> bool:
         return self._ready and not self._degraded and self._context is not None
+
+    def session_diagnostics(self) -> dict:
+        """Safe local diagnostics: report only conversation equality, never IDs."""
+        return {
+            "completed_replies": self._completed_replies,
+            "same_conversation_pairs": self._same_conversation,
+            "different_conversation_pairs": self._different_conversation,
+            "last_relation": self._last_relation,
+        }
+
+    def _observe_reply_conversation(self, conversation_id: str | None) -> None:
+        previous_id = self._last_conversation_id
+        if conversation_id is None or not isinstance(conversation_id, str):
+            relation = "unknown"
+            self._last_conversation_id = None
+        elif self._completed_replies == 0:
+            relation = "first"
+            self._last_conversation_id = conversation_id
+        elif previous_id is None:
+            relation = "unknown"
+            self._last_conversation_id = conversation_id
+        else:
+            relation = "same" if previous_id == conversation_id else "different"
+            if relation == "same":
+                self._same_conversation += 1
+            else:
+                self._different_conversation += 1
+            self._last_conversation_id = conversation_id
+        self._last_relation = relation
+        self._completed_replies += 1
 
     async def __aenter__(self) -> "LiveBrowserEngine":
         self.profile.mkdir(parents=True, exist_ok=True)
@@ -228,6 +269,7 @@ class LiveBrowserEngine:
                 self.bridge.arm()
                 await _send_via_ui(page, prompt, COMPOSER_CSS, SEND_CSS)
                 reply = await self.bridge.await_reply_created(timeout=self.timeout)
+                self._observe_reply_conversation(reply.conversation_id)
                 return reply.text
             except asyncio.CancelledError:
                 # A disconnected HTTP client may cancel an in-flight UI send.
