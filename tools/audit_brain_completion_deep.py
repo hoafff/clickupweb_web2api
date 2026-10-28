@@ -111,7 +111,7 @@ def _other_group(name) -> str:
         return "other_message_prefixed_events"
     if n.startswith("stream"):
         return "other_stream_prefixed_events"
-    if n.startswith(("response", "generation")):
+    if n.startswith(("response", "generation", "result")):
         return "other_response_or_generation_prefixed_events"
     return "other_uncategorized_events"
 
