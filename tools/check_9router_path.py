@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hmac
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 KEY_FILE = ROOT / ".local" / "ninerouter.key"
+GATEWAY_KEY_FILE = ROOT / ".local" / "gateway.key"
 MODEL = "brain/clickup-ui-current"
 ALLOWED_MODEL = re.compile(r"^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$")
 MAX_BODY = 2_000_000
@@ -70,6 +72,32 @@ def read_key(key_path: Path) -> str | None:
     if not key or any(ord(c) < 33 or ord(c) > 126 for c in key):
         raise RouterPathError("Invalid 9Router key file.")
     return key
+
+
+def reject_reused_upstream_key(
+    client_key: str | None,
+    gateway_key_path: Path = GATEWAY_KEY_FILE,
+) -> None:
+    """Prevent accidental reuse of the upstream Gateway key as 9Router client auth.
+
+    9Router typically validates inbound keys against its own API Keys database.
+    An imported custom-provider upstream key is not an issued client key.
+    Never print, transmit or hash/store either credential in diagnostics.
+    """
+    if client_key is None:
+        return
+    try:
+        upstream_key = gateway_key_path.read_text(encoding="ascii").strip()
+    except (FileNotFoundError, OSError, UnicodeError):
+        return
+    if upstream_key and hmac.compare_digest(client_key, upstream_key):
+        raise RouterPathError(
+            "9Router client key equals the upstream ClickUp Gateway key. "
+            "These are distinct authentication roles. Create a CLIENT key "
+            "in the 9Router dashboard's API Keys/Endpoints section, then "
+            "replace only .local/ninerouter.key. Keep .local/gateway.key "
+            "unchanged. No HTTP chat request was sent."
+        )
 
 
 def save_key(key_path: Path) -> None:
@@ -241,6 +269,10 @@ def main(argv: list[str] | None = None) -> int:
         if not ALLOWED_MODEL.fullmatch(args.model) or len(args.model) > 128:
             raise RouterPathError("Invalid prefixed 9Router model name.")
         key = read_key(args.key_file)
+        # Model discovery may be public. Enforce auth-role safety specifically
+        # before CHAT dispatch so --models-only still helps diagnosis.
+        if not args.models_only:
+            reject_reused_upstream_key(key)
         _, _, models_json = request_router(
             port=args.port, path="/v1/models", key=key
         )
