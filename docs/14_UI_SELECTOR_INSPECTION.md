@@ -58,3 +58,35 @@ git pull
 ## Rủi ro cần xử lý trước gateway cloud
 
 Browser session profile chứa credential, không commit/đẩy lên GitHub. Cloud deploy thường cần browser persistent riêng, login recovery, credential encryption, concurrency limits, session expiry, có thể gặp thay đổi DOM. Không thể khẳng định GitHub Actions cron là hosting bền vững hay chính sách ClickUp cho phép bất kỳ hình thức web automation nào mà không đánh giá.
+
+
+## 28/10/2026 — Kết quả inspector lần 1 và hai-pass mới
+
+**Bằng chứng từ terminal thực tế (1280 × 720):**
+- Một editor duy nhất, vị trí `(x=492, y=273, w=600, h=72)` với selector `div[contenteditable="true"]`. `stable=false` vì không có `data-test`/test ID duy nhất.
+- Model selector (ở `x=980, y=353`) có selector ổn định `button[data-test="content-assistant-model-selector-dropdown__trigger"]`.
+- **Không có Send button được xác nhận trong snapshot khi editor còn trống.** `ai-prompt-speech-to-text` là **Talk to Text**, không phải Send. `refinement-prompt-actions-dropdown` là **Attach context/files**, không phải Send.
+- Snapshot cũ giới hạn 25 nút gần editor và bán kính 320px, gây nhiều nhiễu từ header. Inspector mới giới hạn bán kính 175px, tăng giới hạn mục lên 80 và ghi trạng thái `disabled`.
+
+**Giả thuyết cần kiểm chứng:** Send chỉ trở nên visible/enabled sau khi editor có bản nháp. Không được tự động click model selector, microphone hay attachment thay thế.
+
+### Two-pass read-only — không gửi tin
+
+```powershell
+cd E:\Toolss\clickuptoapi
+git pull
+.\.venv\Scripts\python.exe tools\inspect_brain_ui.py --after-draft
+```
+
+1. Mở Brain² Ask, **để trống ô nhập**.
+2. Terminal nhắc lần 1: nhấn Enter **trong PowerShell** để ghi mốc DOM trống; inspector chỉ in số nút ở bước này.
+3. Quay lại Chromium, **chỉ gõ một bản nháp ngắn**, ví dụ `OK`; **không nhấn Enter và không click Send trong Chromium**.
+4. Quay lại **PowerShell** và nhấn Enter ở câu hỏi thứ hai.
+5. Inspector in `visible_editors`, `nearby_buttons_after_draft`, `difference.newly_visible_buttons` và `difference.newly_enabled_buttons`, **không đọc nội dung bản nháp** và không gửi message.
+6. Tự xóa bản nháp nếu không muốn giữ trong trình duyệt. Xem lại các thuộc tính UI trước khi chia sẻ output.
+
+Nếu xuất hiện một candidate Send button, **phải đối chiếu với icon nút trên giao diện**; tọa độ và thứ tự nút không xác nhận vai trò. Selector `stable=false` có thể thay đổi giữa các phiên.
+
+### Cập nhật auto-send để hỗ trợ nút chỉ hiện sau khi gõ
+
+`_send_via_ui()` trong `tools/browser_adapter.py` giờ kiểm tra **composer duy nhất và visible**, sau đó mới `fill(prompt)`, **chờ Send selector xuất hiện**, yêu cầu đúng 1 nút visible+enabled rồi mới `click()`. Nếu Send không xuất hiện thì **không click**, nhưng bản nháp có thể vẫn còn trong ô nhập. Chỉ sử dụng với selector **đã xác minh bằng DOM** và cờ `--confirm-send`.
