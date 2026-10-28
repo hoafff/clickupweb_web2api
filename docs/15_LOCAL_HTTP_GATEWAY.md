@@ -79,7 +79,9 @@ $body = @{
   messages = @(@{ role = "user"; content = "Trả lời đúng một từ: OK" })
   stream = $false
 } | ConvertTo-Json -Depth 5
-Invoke-RestMethod -Uri "http://127.0.0.1:8787/v1/chat/completions" -Method Post -ContentType "application/json" -Headers $headers -Body $body
+# Windows PowerShell 5.1: explicitly encode JSON as UTF-8 bytes.
+$utf8Body = [System.Text.Encoding]::UTF8.GetBytes($body)
+Invoke-RestMethod -Uri "http://127.0.0.1:8787/v1/chat/completions" -Method Post -ContentType "application/json; charset=utf-8" -Headers $headers -Body $utf8Body
 ```
 
 Success should include:
@@ -104,6 +106,38 @@ Invoke-RestMethod http://127.0.0.1:8787/v1/models -Headers $headers
 ```
 
 No public port, domain, tunnel or container exposure should be configured at this stage.
+
+### Windows PowerShell 5.1 — error: `There was an error parsing the body`
+
+One real Windows PowerShell request reached the local gateway but returned an HTTP error **before** the UI-send path: `{"detail":"There was an error parsing the body"}`. In this session the JSON body contains Vietnamese text. **Likely cause:** Windows PowerShell's string `-Body` encoding can differ from the UTF-8 JSON expected by FastAPI. The precise wire bytes from that failure were not captured, so the root cause is **not yet proven**.
+
+**Fix without restarting Chromium or the gateway:** encode the already-built `$body` string as UTF-8 bytes and explicitly declare the charset:
+
+```powershell
+$utf8Body = [System.Text.Encoding]::UTF8.GetBytes($body)
+$response = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/v1/chat/completions' -Method Post -Headers $headers -ContentType 'application/json; charset=utf-8' -Body $utf8Body
+$response.choices[0].message.content
+```
+
+Or update the repo and run the safer helper (defaults to an ASCII-only test prompt, avoiding Windows PowerShell 5.1 source-file encoding ambiguity):
+
+```powershell
+git pull
+.\tools\send_gateway_request.ps1
+# To send Vietnamese text, specify -Prompt explicitly:
+.\tools\send_gateway_request.ps1 -Prompt 'Trả lời đúng một từ: OK'
+```
+
+The helper reads the **Git-ignored local API key** from `.local/gateway.key`, constructs compact JSON, explicitly sends UTF-8 bytes, and prints only the response text. It never outputs the key or the request body. If your execution policy blocks scripts, use the first two-line `$utf8Body` command instead; do not change your machine-wide policy just to run this helper.
+
+If `400` persists, check JSON syntax without sending it:
+
+```powershell
+$null = $body | ConvertFrom-Json -ErrorAction Stop
+[System.Text.Encoding]::UTF8.GetByteCount($body)
+```
+
+The body parse error occurs before the `chat` handler calls Playwright; it should not have submitted the failed prompt to ClickUp. Confirm the browser is still on Brain² Ask before retrying.
 
 ## 5. API contract: intentionally limited
 
